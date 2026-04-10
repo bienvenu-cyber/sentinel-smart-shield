@@ -1,0 +1,70 @@
+version: "3.9"
+
+# =============================================================
+# Système de vidéosurveillance intelligent
+# Frigate NVR + MQTT + Alertes WhatsApp (WapiWay) + Cloudflare Tunnel
+# =============================================================
+
+services:
+
+  # --- Frigate NVR ---
+  frigate:
+    container_name: frigate
+    image: ghcr.io/blakeblackshear/frigate:stable
+    restart: unless-stopped
+    privileged: true
+    shm_size: "256mb"
+    ports:
+      - "5000:5000"   # UI Web (accès local)
+      - "8554:8554"   # RTSP restream
+      - "8555:8555"   # WebRTC
+    volumes:
+      - ./config/frigate.yml:/config/config.yml:ro
+      - ./storage/frigate:/media/frigate
+      - /etc/localtime:/etc/localtime:ro
+      # Décommenter si Google Coral USB TPU :
+      # - /dev/bus/usb:/dev/bus/usb
+    environment:
+      - FRIGATE_RTSP_USER=${FRIGATE_RTSP_USER}
+      - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD}
+    depends_on:
+      - mosquitto
+
+  # --- Mosquitto MQTT Broker ---
+  mosquitto:
+    container_name: mosquitto
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./storage/mosquitto/data:/mosquitto/data
+      - ./storage/mosquitto/log:/mosquitto/log
+
+  # --- Bridge Alertes WhatsApp (WapiWay) ---
+  alertes:
+    container_name: alertes
+    build:
+      context: ./alertes
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./alertes:/app
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      - mosquitto
+      - frigate
+
+  # --- Cloudflare Tunnel (expose Frigate publiquement pour WapiWay) ---
+  cloudflared:
+    container_name: cloudflared
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - frigate
