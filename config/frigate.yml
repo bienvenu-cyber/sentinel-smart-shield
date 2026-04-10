@@ -1,0 +1,90 @@
+# Documentation : https://docs.frigate.video
+
+mqtt:
+  host: mosquitto
+  port: 1883
+
+# --- Détecteur ---
+detectors:
+  cpu1:
+    type: cpu
+    num_threads: 4
+  # Décommenter pour Intel OpenVINO :
+  # openvino:
+  #   type: openvino
+  #   device: AUTO
+  # Décommenter pour Google Coral USB TPU :
+  # coral:
+  #   type: edgetpu
+  #   device: usb
+
+# --- Configuration globale ---
+objects:
+  track:
+    - person
+    - car
+  filters:
+    person:
+      min_score: 0.6
+      min_area: 5000
+    car:
+      min_score: 0.6
+      min_area: 10000
+
+snapshots:
+  enabled: true
+  bounding_box: true
+  timestamp: true
+  retain:
+    default: 7
+
+record:
+  enabled: true
+  retain:
+    days: 7
+    mode: motion
+  events:
+    retain:
+      default: 14
+      mode: active_objects
+
+# --- Caméras ---
+cameras:
+
+  cam_entree:
+    ffmpeg:
+      inputs:
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@192.168.1.10/stream
+          roles: [detect, record]
+    detect:
+      enabled: true
+      width: 1280
+      height: 720
+      fps: 5
+
+  cam_entrepot:
+    ffmpeg:
+      inputs:
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@192.168.1.11/stream
+          roles: [detect, record]
+    detect:
+      enabled: true
+      width: 1280
+      height: 720
+      fps: 5
+    zones:
+      zone_interdite:
+        coordinates: 128,72,512,72,512,648,128,648
+        objects:
+          - person
+
+  cam_parking:
+    ffmpeg:
+      inputs:
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@192.168.1.12/stream
+          roles: [detect, record]
+    detect:
+      enabled: true
+      width: 1280
+      height: 720
+      fps: 5
