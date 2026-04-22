@@ -54,7 +54,7 @@ cameras:
   cam_entree:
     ffmpeg:
       inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@192.168.1.10/stream
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_ENTREE_IP}:{CAM_ENTREE_PORT}{CAM_ENTREE_PATH}
           roles: [detect, record]
     detect:
       enabled: true
@@ -65,7 +65,7 @@ cameras:
   cam_entrepot:
     ffmpeg:
       inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@192.168.1.11/stream
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_ENTREPOT_IP}:{CAM_ENTREPOT_PORT}{CAM_ENTREPOT_PATH}
           roles: [detect, record]
     detect:
       enabled: true
@@ -81,7 +81,21 @@ cameras:
   cam_parking:
     ffmpeg:
       inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@192.168.1.12/stream
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_PARKING_IP}:{CAM_PARKING_PORT}{CAM_PARKING_PATH}
+          roles: [detect, record]
+    detect:
+      enabled: true
+      width: 1280
+      height: 720
+      fps: 5
+
+  # --- Modèle pour nouvelle caméra ---
+  # Dupliquer ce bloc, renommer (cam_xxx) et ajouter les variables
+  # CAM_XXX_IP / CAM_XXX_PORT / CAM_XXX_PATH dans le .env
+  cam_nouvelle:
+    ffmpeg:
+      inputs:
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_NOUVELLE_IP}:{CAM_NOUVELLE_PORT}{CAM_NOUVELLE_PATH}
           roles: [detect, record]
     detect:
       enabled: true
