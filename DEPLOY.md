@@ -118,3 +118,49 @@ git pull
 docker compose pull
 docker compose up -d --build
 ```
+
+## ➕ Ajouter une nouvelle caméra (après déploiement)
+
+### 1. Connecter la caméra au WiFi de l'entreprise
+
+Suivre la procédure du fabricant (app V380 / app constructeur).
+
+### 2. Trouver son IP
+
+```bash
+./scan-network.sh
+```
+
+### 3. Tester le flux RTSP
+
+```bash
+./test-rtsp.sh rtsp://admin:MOTDEPASSE@192.168.1.13:554/stream
+```
+
+Essayer plusieurs chemins si le premier échoue (`/live`, `/h264`, `/live/ch00_0`, `/onvif1`...).
+
+### 4. Renseigner le .env
+
+```bash
+nano .env
+```
+
+Modifier :
+```
+CAM_NOUVELLE_IP=192.168.1.13
+CAM_NOUVELLE_PORT=554
+CAM_NOUVELLE_PATH=/stream
+```
+
+### 5. (Optionnel) Renommer la caméra dans `config/frigate.yml`
+
+Remplacer `cam_nouvelle` par un nom parlant (ex. `cam_atelier`) — penser à renommer aussi les variables `CAM_NOUVELLE_*` dans `.env` ET `docker-compose.yml`.
+
+### 6. Redémarrer Frigate
+
+```bash
+docker compose up -d frigate
+docker compose logs -f frigate
+```
+
+La caméra doit apparaître dans http://IP_SERVEUR:5000 et déclencher des alertes WhatsApp.
