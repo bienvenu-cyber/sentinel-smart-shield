@@ -4,18 +4,26 @@
  demo_webcam_whatsapp.py
 ================================================================
 Démo locale : ouvre la webcam du Mac avec OpenCV, affiche le flux,
-et envoie une alerte WhatsApp via l'API WapiWay quand on appuie
-sur la touche 'A' (simule une détection d'IA).
+et envoie une alerte WhatsApp (TEXTE + IMAGE de la webcam) via
+l'API WapiWay quand on appuie sur la touche 'A'.
+(simule une détection d'IA)
 
 Usage :
     python demo_webcam_whatsapp.py
 
 Touches :
-    A  → envoie une alerte WhatsApp
+    A  → capture la frame courante + envoie alerte WhatsApp avec photo
     Q  → quitte le programme
 
 Prérequis :
     pip install opencv-python requests python-dotenv
+
+Note sur l'envoi d'image :
+    WapiWay attend une URL publique (pas un upload direct).
+    On upload donc la frame sur 0x0.st (gratuit, sans compte,
+    expire automatiquement après ~30 jours) puis on passe l'URL
+    à WapiWay. En production tu pourras remplacer cette étape
+    par ton propre stockage public (S3, Cloudflare R2, etc.).
 ================================================================
 """
 
@@ -44,13 +52,105 @@ WAPIWAY_SESSION_ID = os.getenv("WAPIWAY_SESSION_ID", "")
 COOLDOWN_SECONDS = 30
 _last_alert_ts = 0.0
 
+# Dossier où on sauvegarde les snapshots avant upload
+SNAPSHOT_DIR = "snapshots"
+os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+
 
 # ----------------------------------------------------------------
-# Fonction d'envoi WhatsApp via WapiWay
+# Upload temporaire sur 0x0.st (gratuit, sans compte, expire ~30j)
+# Renvoie une URL publique utilisable par WapiWay.
 # ----------------------------------------------------------------
-def send_whatsapp_alert(message: str = "🚨 Alerte test depuis la webcam Mac") -> bool:
+def upload_image_public(filepath: str) -> str | None:
+    """Upload une image sur 0x0.st et retourne l'URL publique."""
+    try:
+        with open(filepath, "rb") as f:
+            resp = requests.post(
+                "https://0x0.st",
+                files={"file": f},
+                headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
+                timeout=20,
+            )
+        if resp.status_code == 200:
+            url = resp.text.strip()
+            print(f"   📤 Image uploadée : {url}")
+            return url
+        print(f"   ❌ Upload échoué : {resp.status_code} {resp.text[:200]}")
+        return None
+    except Exception as e:
+        print(f"   ❌ Exception upload : {e}")
+        return None
+
+
+# ----------------------------------------------------------------
+# Envoi d'un média (image) via WapiWay
+# ----------------------------------------------------------------
+def _send_media(phone: str, media_url: str, caption: str) -> bool:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {WAPIWAY_API_KEY}",
+    }
+    payload = {
+        "phone_number": phone,
+        "type": "image",
+        "media_url": media_url,
+        "caption": caption[:4096],
+    }
+    if WAPIWAY_SESSION_ID:
+        payload["session_id"] = WAPIWAY_SESSION_ID
+    try:
+        resp = requests.post(
+            f"{WAPIWAY_BASE_URL}/messages/send-media",
+            headers=headers, json=payload, timeout=15,
+        )
+        if resp.status_code in (200, 202):
+            print(f"✅ Image+texte envoyés à {phone}")
+            return True
+        print(f"❌ Erreur média {phone}: {resp.status_code} {resp.text[:200]}")
+        return False
+    except Exception as e:
+        print(f"❌ Exception média {phone}: {e}")
+        return False
+
+
+# ----------------------------------------------------------------
+# Envoi d'un message texte simple via WapiWay (fallback)
+# ----------------------------------------------------------------
+def _send_text(phone: str, content: str) -> bool:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {WAPIWAY_API_KEY}",
+    }
+    payload = {"phone_number": phone, "content": content[:4096]}
+    if WAPIWAY_SESSION_ID:
+        payload["session_id"] = WAPIWAY_SESSION_ID
+    try:
+        resp = requests.post(
+            f"{WAPIWAY_BASE_URL}/messages/send-text",
+            headers=headers, json=payload, timeout=10,
+        )
+        if resp.status_code in (200, 202):
+            print(f"✅ Texte envoyé à {phone}")
+            return True
+        print(f"❌ Erreur texte {phone}: {resp.status_code} {resp.text[:200]}")
+        return False
+    except Exception as e:
+        print(f"❌ Exception texte {phone}: {e}")
+        return False
+
+
+# ----------------------------------------------------------------
+# Fonction principale : envoi alerte (avec image si fournie)
+# ----------------------------------------------------------------
+def send_whatsapp_alert(
+    message: str = "🚨 Alerte test depuis la webcam Mac",
+    frame=None,
+) -> bool:
     """
     Envoie une alerte WhatsApp à tous les numéros configurés.
+    - Si `frame` (image OpenCV/numpy) est fournie : sauvegarde locale,
+      upload public, envoi en image avec légende.
+    - Sinon : envoi texte seul.
     Retourne True si au moins un envoi a réussi.
     """
     global _last_alert_ts
@@ -70,34 +170,33 @@ def send_whatsapp_alert(message: str = "🚨 Alerte test depuis la webcam Mac") 
         print(f"⏳ Cooldown actif — réessaye dans {restant}s")
         return False
 
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {WAPIWAY_API_KEY}",
-    }
-
     horodatage = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     contenu = f"{message}\n🕐 {horodatage}"
 
+    # 1) Si on a une frame → sauvegarde + upload public
+    media_url = None
+    if frame is not None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        snap_path = os.path.join(SNAPSHOT_DIR, f"alerte_{ts}.jpg")
+        # Compression JPEG qualité 85 → image légère mais nette
+        cv2.imwrite(snap_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        print(f"   💾 Frame sauvegardée : {snap_path}")
+        media_url = upload_image_public(snap_path)
+
+    # 2) Envoi à chaque destinataire
     succes = False
     for phone in WAPIWAY_PHONE_NUMBERS:
-        payload = {"phone_number": phone, "content": contenu[:4096]}
-        if WAPIWAY_SESSION_ID:
-            payload["session_id"] = WAPIWAY_SESSION_ID
-
-        try:
-            resp = requests.post(
-                f"{WAPIWAY_BASE_URL}/messages/send-text",
-                headers=headers,
-                json=payload,
-                timeout=10,
-            )
-            if resp.status_code in (200, 202):
-                print(f"✅ Alerte envoyée à {phone}")
+        if media_url:
+            if _send_media(phone, media_url, contenu):
                 succes = True
             else:
-                print(f"❌ Erreur {phone}: {resp.status_code} {resp.text[:200]}")
-        except Exception as e:
-            print(f"❌ Exception {phone}: {e}")
+                # Fallback texte si l'envoi média échoue
+                print(f"   ⚠️ Fallback texte pour {phone}")
+                if _send_text(phone, contenu):
+                    succes = True
+        else:
+            if _send_text(phone, contenu):
+                succes = True
 
     if succes:
         _last_alert_ts = now
@@ -118,7 +217,7 @@ def main():
         sys.exit(1)
 
     print("✅ Webcam ouverte.")
-    print("   [A] = envoyer alerte WhatsApp")
+    print("   [A] = capturer + envoyer alerte WhatsApp avec photo")
     print("   [Q] = quitter")
 
     while True:
@@ -127,11 +226,14 @@ def main():
             print("⚠️ Frame vide, on continue...")
             continue
 
-        # Overlay texte d'aide en bas de la fenêtre
+        # On garde une copie BRUTE pour l'envoi (sans l'overlay vert)
+        frame_clean = frame.copy()
+
+        # Overlay texte d'aide en bas de la fenêtre (affichage seulement)
         h, w = frame.shape[:2]
         cv2.putText(
             frame,
-            "Appuyer sur [A] = alerte WhatsApp | [Q] = quitter",
+            "[A] = alerte WhatsApp + photo  |  [Q] = quitter",
             (10, h - 15),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
@@ -149,9 +251,10 @@ def main():
             break
 
         if key == ord("a") or key == ord("A"):
-            print("🔔 Touche A pressée → envoi de l'alerte...")
+            print("🔔 Touche A pressée → capture + envoi de l'alerte...")
             send_whatsapp_alert(
-                "🚨 *DETECTION SIMULEE*\n📷 Webcam Mac (demo locale)"
+                message="🚨 *DETECTION SIMULEE*\n📷 Webcam Mac (demo locale)",
+                frame=frame_clean,  # ← frame sans l'overlay vert
             )
 
     cap.release()
