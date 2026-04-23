@@ -58,28 +58,53 @@ os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
 
 # ----------------------------------------------------------------
-# Upload temporaire sur 0x0.st (gratuit, sans compte, expire ~30j)
+# Upload public d'image — essaie plusieurs services en cascade
+# (catbox.moe en priorité, fallback tmpfiles.org).
 # Renvoie une URL publique utilisable par WapiWay.
 # ----------------------------------------------------------------
 def upload_image_public(filepath: str) -> str | None:
-    """Upload une image sur 0x0.st et retourne l'URL publique."""
+    """Upload une image sur un hébergeur public et retourne l'URL."""
+
+    # --- Essai 1 : catbox.moe (gratuit, anonyme, fichiers permanents) ---
     try:
         with open(filepath, "rb") as f:
             resp = requests.post(
-                "https://0x0.st",
-                files={"file": f},
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": f},
                 headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
-                timeout=20,
+                timeout=30,
+            )
+        if resp.status_code == 200 and resp.text.startswith("http"):
+            url = resp.text.strip()
+            print(f"   📤 Image uploadée (catbox) : {url}")
+            return url
+        print(f"   ⚠️ catbox a refusé : {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        print(f"   ⚠️ Exception catbox : {e}")
+
+    # --- Essai 2 : tmpfiles.org (fallback, fichiers gardés ~1h) ---
+    try:
+        with open(filepath, "rb") as f:
+            resp = requests.post(
+                "https://tmpfiles.org/api/v1/upload",
+                files={"file": f},
+                timeout=30,
             )
         if resp.status_code == 200:
-            url = resp.text.strip()
-            print(f"   📤 Image uploadée : {url}")
-            return url
-        print(f"   ❌ Upload échoué : {resp.status_code} {resp.text[:200]}")
-        return None
+            data = resp.json()
+            raw_url = data.get("data", {}).get("url", "")
+            # tmpfiles renvoie une page HTML, on convertit en lien direct image
+            if raw_url:
+                direct_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                print(f"   📤 Image uploadée (tmpfiles) : {direct_url}")
+                return direct_url
+        print(f"   ❌ tmpfiles a refusé : {resp.status_code} {resp.text[:200]}")
     except Exception as e:
-        print(f"   ❌ Exception upload : {e}")
-        return None
+        print(f"   ❌ Exception tmpfiles : {e}")
+
+    print("   ❌ Tous les hébergeurs ont échoué — fallback texte")
+    return None
 
 
 # ----------------------------------------------------------------
