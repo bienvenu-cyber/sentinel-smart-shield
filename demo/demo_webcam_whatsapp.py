@@ -299,83 +299,129 @@ def send_whatsapp_alert(
 # ----------------------------------------------------------------
 # Boucle principale : webcam + détection touche
 # ----------------------------------------------------------------
-def main():
-    print("📷 Ouverture de la webcam...")
+def annoter_frame(frame, detection: dict):
+    """Dessine bbox, label, score et bandeau caméra/horodatage sur la frame."""
+    x1, y1, x2, y2 = detection["bbox"]
+    fh, fw = frame.shape[:2]
+    x1, x2 = min(x1, fw - 1), min(x2, fw - 1)
+    y1, y2 = min(y1, fh - 1), min(y2, fh - 1)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+    etiquette = f"{detection['label_en']} {int(detection['score']*100)}%"
+    (tw, th), _ = cv2.getTextSize(etiquette, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+    cv2.rectangle(frame, (x1, max(0, y1 - th - 8)), (x1 + tw + 8, y1), (0, 0, 255), -1)
+    cv2.putText(
+        frame, etiquette, (x1 + 4, max(th, y1) - 4),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2,
+    )
+    bandeau = f"{CAMERA_NAME} | {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+    cv2.rectangle(frame, (0, 0), (fw, 28), (0, 0, 0), -1)
+    cv2.putText(
+        frame, bandeau, (8, 20),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1,
+    )
+    return frame
 
-    # 0 = webcam par défaut du Mac (FaceTime HD)
+
+def capturer_frame_silencieux():
+    """
+    Allume la webcam en arrière-plan (sans fenêtre), capture une frame
+    nette après warmup, puis libère la webcam au bout de WEBCAM_OFF_DELAY.
+    Retourne la frame ou None.
+    """
+    print(f"   📷 Activation webcam (silencieuse, {WEBCAM_OFF_DELAY}s)...")
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("❌ Impossible d'ouvrir la webcam.")
-        print("   → Vérifie : Réglages Système > Confidentialité > Caméra")
-        sys.exit(1)
+        print("   ❌ Impossible d'ouvrir la webcam.")
+        return None
+    try:
+        # Warmup : laisser le capteur s'auto-régler (expo/balance des blancs)
+        frame = None
+        for _ in range(WEBCAM_WARMUP_FRAMES):
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(0.05)
+        if frame is None:
+            print("   ❌ Aucune frame lue.")
+            return None
+        # On garde la webcam active quelques secondes (réalisme + buffer)
+        t_fin = time.time() + WEBCAM_OFF_DELAY
+        while time.time() < t_fin:
+            cap.read()  # vidange le buffer
+            time.sleep(0.1)
+        return frame
+    finally:
+        cap.release()
+        print("   📴 Webcam coupée.")
 
-    print("✅ Webcam ouverte.")
-    print("   [A] = capturer + envoyer alerte WhatsApp avec photo")
+
+class _ClavierNonBloquant:
+    """Lit les touches du terminal sans bloquer ni afficher (mode raw)."""
+    def __enter__(self):
+        self.fd = sys.stdin.fileno()
+        self.old = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)
+        return self
+
+    def __exit__(self, *a):
+        termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
+
+    def lire_touche(self, timeout=0.5) -> str | None:
+        r, _, _ = select.select([sys.stdin], [], [], timeout)
+        return sys.stdin.read(1) if r else None
+
+
+def declencher_alerte():
+    """Capture silencieuse + analyse IA simulée + envoi WhatsApp."""
+    detection = simulate_ai_detection()
+    print(
+        f"   🧠 IA → {detection['label_fr']} "
+        f"({int(detection['score']*100)}%) zone={detection['zone']}"
+    )
+    frame = capturer_frame_silencieux()
+    if frame is None:
+        send_whatsapp_alert(detection=detection)  # texte seul si webcam KO
+        return
+    annoter_frame(frame, detection)
+    send_whatsapp_alert(frame=frame, detection=detection)
+
+
+def main():
+    print("=" * 56)
+    print("🛡️  SENTINEL — Démo locale (mode silencieux)")
+    print("=" * 56)
+    print(f"   📷 Caméra simulée : {CAMERA_NAME}")
+    print(f"   📞 Destinataires  : {len(WAPIWAY_PHONE_NUMBERS)} numéro(s)")
+    print(f"   ⏱️  Auto-extinction webcam : {WEBCAM_OFF_DELAY}s")
+    print("-" * 56)
+    print("   [A] = déclencher une alerte (capture + WhatsApp)")
     print("   [Q] = quitter")
+    print("=" * 56)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("⚠️ Frame vide, on continue...")
-            continue
+    # Si stdin n'est pas un TTY (ex: lancé via cron) → mode démon, pas d'input
+    if not sys.stdin.isatty():
+        print("ℹ️ stdin non-TTY → mode démon (Ctrl+C pour arrêter)")
+        try:
+            while True:
+                time.sleep(60)
+        except KeyboardInterrupt:
+            print("👋 Arrêt.")
+        return
 
-        # On garde une copie BRUTE pour l'envoi (sans l'overlay vert)
-        frame_clean = frame.copy()
-
-        # Overlay texte d'aide en bas de la fenêtre (affichage seulement)
-        h, w = frame.shape[:2]
-        cv2.putText(
-            frame,
-            "[A] = alerte WhatsApp + photo  |  [Q] = quitter",
-            (10, h - 15),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 0),
-            2,
-        )
-
-        cv2.imshow("Demo Webcam → WhatsApp (Mac)", frame)
-
-        # waitKey(1) = 1ms — indispensable pour rafraîchir la fenêtre
-        key = cv2.waitKey(1) & 0xFF
-
-        if key == ord("q") or key == ord("Q"):
-            print("🛑 Sortie demandée.")
-            break
-
-        if key == ord("a") or key == ord("A"):
-            print("🔔 Touche A pressée → analyse IA simulée + envoi...")
-            detection = simulate_ai_detection()
-            print(
-                f"   🧠 IA → {detection['label_fr']} "
-                f"({int(detection['score']*100)}%) zone={detection['zone']}"
-            )
-
-            # Annotation de la frame envoyée : bbox + label + score (style Frigate/YOLO)
-            x1, y1, x2, y2 = detection["bbox"]
-            fh, fw = frame_clean.shape[:2]
-            x1, x2 = min(x1, fw - 1), min(x2, fw - 1)
-            y1, y2 = min(y1, fh - 1), min(y2, fh - 1)
-            cv2.rectangle(frame_clean, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            etiquette = f"{detection['label_en']} {int(detection['score']*100)}%"
-            (tw, th), _ = cv2.getTextSize(etiquette, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(frame_clean, (x1, y1 - th - 8), (x1 + tw + 8, y1), (0, 0, 255), -1)
-            cv2.putText(
-                frame_clean, etiquette, (x1 + 4, y1 - 4),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2,
-            )
-            # Bandeau horodatage + caméra en haut de l'image
-            bandeau = f"{CAMERA_NAME} | {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-            cv2.rectangle(frame_clean, (0, 0), (fw, 28), (0, 0, 0), -1)
-            cv2.putText(
-                frame_clean, bandeau, (8, 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1,
-            )
-
-            send_whatsapp_alert(frame=frame_clean, detection=detection)
-
-    cap.release()
-    cv2.destroyAllWindows()
+    try:
+        with _ClavierNonBloquant() as clavier:
+            while True:
+                touche = clavier.lire_touche(timeout=0.5)
+                if touche is None:
+                    continue
+                if touche.lower() == "q":
+                    print("🛑 Sortie demandée.")
+                    break
+                if touche.lower() == "a":
+                    print("🔔 Alerte déclenchée → analyse IA + capture...")
+                    declencher_alerte()
+                    print("   ✅ Prêt pour la prochaine alerte ([A] / [Q])\n")
+    except KeyboardInterrupt:
+        print("\n🛑 Interrompu.")
     print("👋 Terminé.")
 
 
