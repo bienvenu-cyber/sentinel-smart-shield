@@ -1,0 +1,10 @@
+# Snapshots capturés depuis la webcam (peuvent être lourds + privés)
+snapshots/
+
+# Fichier d'env local (clé API WapiWay, numéros de tel)
+.env
+
+# Environnement virtuel Python
+.venv/
+__pycache__/
+*.pyc
