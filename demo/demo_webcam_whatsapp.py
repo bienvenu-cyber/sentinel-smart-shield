@@ -208,20 +208,17 @@ def send_whatsapp_alert(
         print(f"   💾 Frame sauvegardée : {snap_path}")
         media_url = upload_image_public(snap_path)
 
+    # Si l'upload public a réussi, on ajoute le lien dans le message texte
+    # (l'API publique WapiWay actuelle exige un media_asset_id UUID interne,
+    #  donc on ne peut pas envoyer l'image directement — on met le lien à la place)
+    if media_url:
+        contenu = f"{contenu}\n\n📸 Photo : {media_url}"
+
     # 2) Envoi à chaque destinataire
     succes = False
     for phone in WAPIWAY_PHONE_NUMBERS:
-        if media_url:
-            if _send_media(phone, media_url, contenu):
-                succes = True
-            else:
-                # Fallback texte si l'envoi média échoue
-                print(f"   ⚠️ Fallback texte pour {phone}")
-                if _send_text(phone, contenu):
-                    succes = True
-        else:
-            if _send_text(phone, contenu):
-                succes = True
+        if _send_text(phone, contenu):
+            succes = True
 
     if succes:
         _last_alert_ts = now
