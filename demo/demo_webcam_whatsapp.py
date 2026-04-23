@@ -329,28 +329,47 @@ def capturer_frame_silencieux():
     Retourne la frame ou None.
     """
     print(f"   📷 Activation webcam (silencieuse, {WEBCAM_OFF_DELAY}s)...")
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("   ❌ Impossible d'ouvrir la webcam.")
+    # macOS peut mettre 1-2s à relâcher la webcam entre deux ouvertures
+    # → on retente plusieurs fois avec un petit délai
+    cap = None
+    for tentative in range(5):
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            break
+        cap.release()
+        time.sleep(0.5)
+    if cap is None or not cap.isOpened():
+        print("   ❌ Impossible d'ouvrir la webcam (occupée par une autre app ?).")
         return None
     try:
-        # Warmup : laisser le capteur s'auto-régler (expo/balance des blancs)
+        # Warmup tolérant : on lit jusqu'à WEBCAM_WARMUP_FRAMES frames valides,
+        # avec max 30 essais (capteur qui se réveille après libération macOS)
         frame = None
-        for _ in range(WEBCAM_WARMUP_FRAMES):
-            ret, frame = cap.read()
-            if not ret:
-                time.sleep(0.05)
+        valides = 0
+        essais = 0
+        while valides < WEBCAM_WARMUP_FRAMES and essais < 30:
+            ret, f = cap.read()
+            essais += 1
+            if ret and f is not None:
+                frame = f
+                valides += 1
+            else:
+                time.sleep(0.1)
         if frame is None:
-            print("   ❌ Aucune frame lue.")
+            print(f"   ❌ Aucune frame lue après {essais} essais.")
             return None
         # On garde la webcam active quelques secondes (réalisme + buffer)
         t_fin = time.time() + WEBCAM_OFF_DELAY
         while time.time() < t_fin:
-            cap.read()  # vidange le buffer
+            ret, f = cap.read()
+            if ret and f is not None:
+                frame = f  # on garde toujours la dernière frame valide
             time.sleep(0.1)
         return frame
     finally:
         cap.release()
+        # Petit délai pour laisser macOS libérer le device proprement
+        time.sleep(0.3)
         print("   📴 Webcam coupée.")
 
 
