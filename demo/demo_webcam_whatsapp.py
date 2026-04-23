@@ -31,6 +31,9 @@ import os
 import sys
 import time
 import random
+import select
+import termios
+import tty
 from datetime import datetime
 
 import cv2
