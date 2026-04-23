@@ -60,10 +60,16 @@ _last_alert_ts = 0.0
 WEBCAM_OFF_DELAY = int(os.getenv("WEBCAM_OFF_DELAY", "5"))
 # Nombre de frames à "chauffer" avant capture (capteur s'auto-règle)
 WEBCAM_WARMUP_FRAMES = int(os.getenv("WEBCAM_WARMUP_FRAMES", "8"))
+# Durée d'enregistrement vidéo (secondes) — touche X
+VIDEO_DURATION = int(os.getenv("VIDEO_DURATION", "5"))
+# FPS cible pour l'enregistrement vidéo
+VIDEO_FPS = int(os.getenv("VIDEO_FPS", "20"))
 
 # Dossier où on sauvegarde les snapshots avant upload
 SNAPSHOT_DIR = "snapshots"
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+VIDEO_DIR = "videos"
+os.makedirs(VIDEO_DIR, exist_ok=True)
 
 # ----------------------------------------------------------------
 # Simulation IA — génère une "détection" réaliste
@@ -170,16 +176,42 @@ def upload_image_public(filepath: str) -> str | None:
 
 
 # ----------------------------------------------------------------
-# Envoi d'un média (image) via WapiWay
+# Upload public d'une vidéo (catbox supporte jusqu'à 200 Mo)
 # ----------------------------------------------------------------
-def _send_media(phone: str, media_url: str, caption: str) -> bool:
+def upload_video_public(filepath: str) -> str | None:
+    """Upload une vidéo sur catbox.moe et retourne l'URL publique."""
+    try:
+        size_mo = os.path.getsize(filepath) / (1024 * 1024)
+        print(f"   📤 Upload vidéo ({size_mo:.1f} Mo) sur catbox...")
+        with open(filepath, "rb") as f:
+            resp = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": f},
+                headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
+                timeout=120,
+            )
+        if resp.status_code == 200 and resp.text.startswith("http"):
+            url = resp.text.strip()
+            print(f"   ✅ Vidéo uploadée : {url}")
+            return url
+        print(f"   ❌ catbox a refusé la vidéo : {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        print(f"   ❌ Exception upload vidéo : {e}")
+    return None
+
+
+# ----------------------------------------------------------------
+# Envoi d'un média (image ou vidéo) via WapiWay
+# ----------------------------------------------------------------
+def _send_media(phone: str, media_url: str, caption: str, media_type: str = "image") -> bool:
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {WAPIWAY_API_KEY}",
     }
     payload = {
         "phone_number": phone,
-        "type": "image",
+        "type": media_type,
         "media_url": media_url,
         "caption": caption[:4096],
     }
@@ -188,10 +220,10 @@ def _send_media(phone: str, media_url: str, caption: str) -> bool:
     try:
         resp = requests.post(
             f"{WAPIWAY_BASE_URL}/messages/send-media",
-            headers=headers, json=payload, timeout=15,
+            headers=headers, json=payload, timeout=30,
         )
         if resp.status_code in (200, 202):
-            print(f"✅ Image+texte envoyés à {phone}")
+            print(f"✅ {media_type.capitalize()}+texte envoyés à {phone}")
             return True
         print(f"❌ Erreur média {phone}: {resp.status_code} {resp.text[:200]}")
         return False
@@ -233,12 +265,14 @@ def send_whatsapp_alert(
     message: str | None = None,
     frame=None,
     detection: dict | None = None,
+    video_path: str | None = None,
 ) -> bool:
     """
     Envoie une alerte WhatsApp à tous les numéros configurés.
     - Si `detection` est fournie : génère une légende standard IA.
     - Sinon : utilise `message` (ou un message par défaut).
     - Si `frame` est fournie : sauvegarde + upload + envoi en image WhatsApp.
+    - Si `video_path` est fournie : upload + envoi en vidéo WhatsApp.
     Retourne True si au moins un envoi a réussi.
     """
     global _last_alert_ts
@@ -265,9 +299,13 @@ def send_whatsapp_alert(
         horodatage = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         contenu = f"{message or '🚨 Alerte'}\n🕐 {horodatage}"
 
-    # 1) Si on a une frame → sauvegarde + upload public
+    # 1) Préparer le média : vidéo (priorité) OU image
     media_url = None
-    if frame is not None:
+    media_type = "image"
+    if video_path is not None:
+        media_type = "video"
+        media_url = upload_video_public(video_path)
+    elif frame is not None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         snap_path = os.path.join(SNAPSHOT_DIR, f"alerte_{ts}.jpg")
         # Compression JPEG qualité 85 → image légère mais nette
@@ -282,10 +320,11 @@ def send_whatsapp_alert(
     for phone in WAPIWAY_PHONE_NUMBERS:
         envoye = False
         if media_url:
-            envoye = _send_media(phone, media_url, contenu)
+            envoye = _send_media(phone, media_url, contenu, media_type=media_type)
         if not envoye:
+            emoji_media = "🎥" if media_type == "video" else "📸"
             contenu_fallback = (
-                f"{contenu}\n\n📸 Photo : {media_url}" if media_url else contenu
+                f"{contenu}\n\n{emoji_media} Média : {media_url}" if media_url else contenu
             )
             envoye = _send_text(phone, contenu_fallback)
         if envoye:
@@ -404,6 +443,86 @@ def declencher_alerte():
     send_whatsapp_alert(frame=frame, detection=detection)
 
 
+def enregistrer_video_silencieux(detection: dict) -> str | None:
+    """
+    Enregistre une courte vidéo (VIDEO_DURATION s) depuis la webcam,
+    avec annotations IA en surimpression à chaque frame. Renvoie le chemin
+    du fichier .mp4 créé, ou None si échec.
+    """
+    print(f"   🎥 Enregistrement vidéo ({VIDEO_DURATION}s @ {VIDEO_FPS}fps)...")
+    cap = None
+    for tentative in range(5):
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            break
+        cap.release()
+        time.sleep(0.5)
+    if cap is None or not cap.isOpened():
+        print("   ❌ Impossible d'ouvrir la webcam (occupée ?).")
+        return None
+
+    try:
+        # Warmup capteur
+        for _ in range(WEBCAM_WARMUP_FRAMES):
+            cap.read()
+
+        # Récupération résolution réelle
+        ret, frame0 = cap.read()
+        if not ret or frame0 is None:
+            print("   ❌ Aucune frame lue pour démarrer la vidéo.")
+            return None
+        h, w = frame0.shape[:2]
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        video_path = os.path.join(VIDEO_DIR, f"alerte_{ts}.mp4")
+        # mp4v = compatible WhatsApp et lisible partout
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(video_path, fourcc, VIDEO_FPS, (w, h))
+        if not writer.isOpened():
+            print("   ❌ Impossible d'initialiser l'encodeur vidéo.")
+            return None
+
+        nb_frames_cible = VIDEO_DURATION * VIDEO_FPS
+        ecrites = 0
+        t_debut = time.time()
+        # Chrono de la durée écoulée (pour bandeau)
+        while ecrites < nb_frames_cible:
+            ret, f = cap.read()
+            if not ret or f is None:
+                time.sleep(0.02)
+                continue
+            # Annotation live : bbox + label + horodatage à chaque frame
+            annoter_frame(f, detection)
+            elapsed = time.time() - t_debut
+            cv2.putText(
+                f, f"REC {elapsed:0.1f}s", (f.shape[1] - 130, 22),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2,
+            )
+            writer.write(f)
+            ecrites += 1
+        writer.release()
+        print(f"   💾 Vidéo sauvegardée : {video_path} ({ecrites} frames)")
+        return video_path
+    finally:
+        cap.release()
+        time.sleep(0.3)
+        print("   📴 Webcam coupée.")
+
+
+def declencher_alerte_video():
+    """Enregistrement vidéo silencieux + analyse IA simulée + envoi WhatsApp."""
+    detection = simulate_ai_detection()
+    print(
+        f"   🧠 IA → {detection['label_fr']} "
+        f"({int(detection['score']*100)}%) zone={detection['zone']}"
+    )
+    video_path = enregistrer_video_silencieux(detection)
+    if video_path is None:
+        send_whatsapp_alert(detection=detection)  # texte seul si webcam KO
+        return
+    send_whatsapp_alert(detection=detection, video_path=video_path)
+
+
 def main():
     print("=" * 56)
     print("🛡️  SENTINEL — Démo locale (mode silencieux)")
@@ -411,8 +530,10 @@ def main():
     print(f"   📷 Caméra simulée : {CAMERA_NAME}")
     print(f"   📞 Destinataires  : {len(WAPIWAY_PHONE_NUMBERS)} numéro(s)")
     print(f"   ⏱️  Auto-extinction webcam : {WEBCAM_OFF_DELAY}s")
+    print(f"   🎥 Durée vidéo (touche X) : {VIDEO_DURATION}s @ {VIDEO_FPS}fps")
     print("-" * 56)
-    print("   [A] = déclencher une alerte (capture + WhatsApp)")
+    print("   [A] = alerte PHOTO (capture + WhatsApp)")
+    print("   [X] = alerte VIDÉO (enregistrement + WhatsApp)")
     print("   [Q] = quitter")
     print("=" * 56)
 
@@ -436,9 +557,13 @@ def main():
                     print("🛑 Sortie demandée.")
                     break
                 if touche.lower() == "a":
-                    print("🔔 Alerte déclenchée → analyse IA + capture...")
+                    print("🔔 Alerte PHOTO déclenchée → analyse IA + capture...")
                     declencher_alerte()
                     print("   ✅ Prêt pour la prochaine alerte ([A] / [Q])\n")
+                if touche.lower() == "x":
+                    print("🎬 Alerte VIDÉO déclenchée → analyse IA + enregistrement...")
+                    declencher_alerte_video()
+                    print("   ✅ Prêt pour la prochaine alerte ([A] / [X] / [Q])\n")
     except KeyboardInterrupt:
         print("\n🛑 Interrompu.")
     print("👋 Terminé.")
