@@ -202,16 +202,16 @@ def upload_video_public(filepath: str) -> str | None:
 
 
 # ----------------------------------------------------------------
-# Envoi d'un média (image) via WapiWay
+# Envoi d'un média (image ou vidéo) via WapiWay
 # ----------------------------------------------------------------
-def _send_media(phone: str, media_url: str, caption: str) -> bool:
+def _send_media(phone: str, media_url: str, caption: str, media_type: str = "image") -> bool:
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {WAPIWAY_API_KEY}",
     }
     payload = {
         "phone_number": phone,
-        "type": "image",
+        "type": media_type,
         "media_url": media_url,
         "caption": caption[:4096],
     }
@@ -220,10 +220,10 @@ def _send_media(phone: str, media_url: str, caption: str) -> bool:
     try:
         resp = requests.post(
             f"{WAPIWAY_BASE_URL}/messages/send-media",
-            headers=headers, json=payload, timeout=15,
+            headers=headers, json=payload, timeout=30,
         )
         if resp.status_code in (200, 202):
-            print(f"✅ Image+texte envoyés à {phone}")
+            print(f"✅ {media_type.capitalize()}+texte envoyés à {phone}")
             return True
         print(f"❌ Erreur média {phone}: {resp.status_code} {resp.text[:200]}")
         return False
