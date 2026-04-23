@@ -60,10 +60,16 @@ _last_alert_ts = 0.0
 WEBCAM_OFF_DELAY = int(os.getenv("WEBCAM_OFF_DELAY", "5"))
 # Nombre de frames à "chauffer" avant capture (capteur s'auto-règle)
 WEBCAM_WARMUP_FRAMES = int(os.getenv("WEBCAM_WARMUP_FRAMES", "8"))
+# Durée d'enregistrement vidéo (secondes) — touche X
+VIDEO_DURATION = int(os.getenv("VIDEO_DURATION", "5"))
+# FPS cible pour l'enregistrement vidéo
+VIDEO_FPS = int(os.getenv("VIDEO_FPS", "20"))
 
 # Dossier où on sauvegarde les snapshots avant upload
 SNAPSHOT_DIR = "snapshots"
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+VIDEO_DIR = "videos"
+os.makedirs(VIDEO_DIR, exist_ok=True)
 
 # ----------------------------------------------------------------
 # Simulation IA — génère une "détection" réaliste
