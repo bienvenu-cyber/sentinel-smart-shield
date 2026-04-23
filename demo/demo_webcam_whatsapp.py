@@ -176,6 +176,32 @@ def upload_image_public(filepath: str) -> str | None:
 
 
 # ----------------------------------------------------------------
+# Upload public d'une vidéo (catbox supporte jusqu'à 200 Mo)
+# ----------------------------------------------------------------
+def upload_video_public(filepath: str) -> str | None:
+    """Upload une vidéo sur catbox.moe et retourne l'URL publique."""
+    try:
+        size_mo = os.path.getsize(filepath) / (1024 * 1024)
+        print(f"   📤 Upload vidéo ({size_mo:.1f} Mo) sur catbox...")
+        with open(filepath, "rb") as f:
+            resp = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": f},
+                headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
+                timeout=120,
+            )
+        if resp.status_code == 200 and resp.text.startswith("http"):
+            url = resp.text.strip()
+            print(f"   ✅ Vidéo uploadée : {url}")
+            return url
+        print(f"   ❌ catbox a refusé la vidéo : {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        print(f"   ❌ Exception upload vidéo : {e}")
+    return None
+
+
+# ----------------------------------------------------------------
 # Envoi d'un média (image) via WapiWay
 # ----------------------------------------------------------------
 def _send_media(phone: str, media_url: str, caption: str) -> bool:
