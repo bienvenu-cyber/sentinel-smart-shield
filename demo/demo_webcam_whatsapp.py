@@ -30,6 +30,7 @@ Note sur l'envoi d'image :
 import os
 import sys
 import time
+import random
 from datetime import datetime
 
 import cv2
@@ -55,6 +56,59 @@ _last_alert_ts = 0.0
 # Dossier où on sauvegarde les snapshots avant upload
 SNAPSHOT_DIR = "snapshots"
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+
+# ----------------------------------------------------------------
+# Simulation IA — génère une "détection" réaliste
+# (en prod, ces valeurs viennent de Frigate / YOLO / OpenVINO)
+# ----------------------------------------------------------------
+CAMERA_NAME = os.getenv("DEMO_CAMERA_NAME", "CAM-01 Entrée principale")
+DETECTION_LABELS = [
+    ("person",   "Personne",          ["entrée", "allée", "portail"]),
+    ("person",   "Personne",          ["jardin", "terrasse"]),
+    ("car",      "Véhicule",          ["allée", "parking"]),
+    ("motorcycle","Deux-roues",       ["portail", "rue"]),
+]
+
+def simulate_ai_detection() -> dict:
+    """Simule une détection IA (label, score, zone, bbox)."""
+    label_en, label_fr, zones = random.choice(DETECTION_LABELS)
+    return {
+        "label_en": label_en,
+        "label_fr": label_fr,
+        "score": round(random.uniform(0.82, 0.98), 2),
+        "zone": random.choice(zones),
+        "bbox": [
+            random.randint(40, 200),
+            random.randint(40, 200),
+            random.randint(220, 480),
+            random.randint(220, 440),
+        ],
+        "event_id": f"evt_{int(time.time())}_{random.randint(1000, 9999)}",
+    }
+
+
+def build_alert_caption(detection: dict, camera: str = CAMERA_NAME) -> str:
+    """Construit une légende WhatsApp standard exploitable par le responsable sécurité."""
+    now = datetime.now()
+    date_str = now.strftime("%d/%m/%Y")
+    heure_str = now.strftime("%H:%M:%S")
+    score_pct = int(detection["score"] * 100)
+    x1, y1, x2, y2 = detection["bbox"]
+
+    return (
+        f"🚨 *ALERTE SÉCURITÉ — DÉTECTION IA*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📷 Caméra     : *{camera}*\n"
+        f"🏷️  Détection  : *{detection['label_fr']}* (`{detection['label_en']}`)\n"
+        f"🎯 Confiance  : *{score_pct}%*\n"
+        f"📍 Zone       : {detection['zone']}\n"
+        f"📐 Position   : [{x1},{y1}]→[{x2},{y2}]\n"
+        f"🕐 Horodatage : {date_str} à {heure_str}\n"
+        f"🆔 Event ID   : `{detection['event_id']}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ Action recommandée : vérifier le flux live et confirmer."
+    )
+
 
 
 # ----------------------------------------------------------------
@@ -168,14 +222,15 @@ def _send_text(phone: str, content: str) -> bool:
 # Fonction principale : envoi alerte (avec image si fournie)
 # ----------------------------------------------------------------
 def send_whatsapp_alert(
-    message: str = "🚨 Alerte test depuis la webcam Mac",
+    message: str | None = None,
     frame=None,
+    detection: dict | None = None,
 ) -> bool:
     """
     Envoie une alerte WhatsApp à tous les numéros configurés.
-    - Si `frame` (image OpenCV/numpy) est fournie : sauvegarde locale,
-      upload public, envoi en image avec légende.
-    - Sinon : envoi texte seul.
+    - Si `detection` est fournie : génère une légende standard IA.
+    - Sinon : utilise `message` (ou un message par défaut).
+    - Si `frame` est fournie : sauvegarde + upload + envoi en image WhatsApp.
     Retourne True si au moins un envoi a réussi.
     """
     global _last_alert_ts
@@ -195,8 +250,12 @@ def send_whatsapp_alert(
         print(f"⏳ Cooldown actif — réessaye dans {restant}s")
         return False
 
-    horodatage = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    contenu = f"{message}\n🕐 {horodatage}"
+    # Légende : détection IA simulée OU message libre
+    if detection is not None:
+        contenu = build_alert_caption(detection)
+    else:
+        horodatage = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        contenu = f"{message or '🚨 Alerte'}\n🕐 {horodatage}"
 
     # 1) Si on a une frame → sauvegarde + upload public
     media_url = None
@@ -277,11 +336,35 @@ def main():
             break
 
         if key == ord("a") or key == ord("A"):
-            print("🔔 Touche A pressée → capture + envoi de l'alerte...")
-            send_whatsapp_alert(
-                message="🚨 *DETECTION SIMULEE*\n📷 Webcam Mac (demo locale)",
-                frame=frame_clean,  # ← frame sans l'overlay vert
+            print("🔔 Touche A pressée → analyse IA simulée + envoi...")
+            detection = simulate_ai_detection()
+            print(
+                f"   🧠 IA → {detection['label_fr']} "
+                f"({int(detection['score']*100)}%) zone={detection['zone']}"
             )
+
+            # Annotation de la frame envoyée : bbox + label + score (style Frigate/YOLO)
+            x1, y1, x2, y2 = detection["bbox"]
+            fh, fw = frame_clean.shape[:2]
+            x1, x2 = min(x1, fw - 1), min(x2, fw - 1)
+            y1, y2 = min(y1, fh - 1), min(y2, fh - 1)
+            cv2.rectangle(frame_clean, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            etiquette = f"{detection['label_en']} {int(detection['score']*100)}%"
+            (tw, th), _ = cv2.getTextSize(etiquette, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(frame_clean, (x1, y1 - th - 8), (x1 + tw + 8, y1), (0, 0, 255), -1)
+            cv2.putText(
+                frame_clean, etiquette, (x1 + 4, y1 - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2,
+            )
+            # Bandeau horodatage + caméra en haut de l'image
+            bandeau = f"{CAMERA_NAME} | {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+            cv2.rectangle(frame_clean, (0, 0), (fw, 28), (0, 0, 0), -1)
+            cv2.putText(
+                frame_clean, bandeau, (8, 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1,
+            )
+
+            send_whatsapp_alert(frame=frame_clean, detection=detection)
 
     cap.release()
     cv2.destroyAllWindows()
