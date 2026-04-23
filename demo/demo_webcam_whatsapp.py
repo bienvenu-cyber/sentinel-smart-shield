@@ -265,12 +265,14 @@ def send_whatsapp_alert(
     message: str | None = None,
     frame=None,
     detection: dict | None = None,
+    video_path: str | None = None,
 ) -> bool:
     """
     Envoie une alerte WhatsApp à tous les numéros configurés.
     - Si `detection` est fournie : génère une légende standard IA.
     - Sinon : utilise `message` (ou un message par défaut).
     - Si `frame` est fournie : sauvegarde + upload + envoi en image WhatsApp.
+    - Si `video_path` est fournie : upload + envoi en vidéo WhatsApp.
     Retourne True si au moins un envoi a réussi.
     """
     global _last_alert_ts
@@ -297,9 +299,13 @@ def send_whatsapp_alert(
         horodatage = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         contenu = f"{message or '🚨 Alerte'}\n🕐 {horodatage}"
 
-    # 1) Si on a une frame → sauvegarde + upload public
+    # 1) Préparer le média : vidéo (priorité) OU image
     media_url = None
-    if frame is not None:
+    media_type = "image"
+    if video_path is not None:
+        media_type = "video"
+        media_url = upload_video_public(video_path)
+    elif frame is not None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         snap_path = os.path.join(SNAPSHOT_DIR, f"alerte_{ts}.jpg")
         # Compression JPEG qualité 85 → image légère mais nette
@@ -314,10 +320,11 @@ def send_whatsapp_alert(
     for phone in WAPIWAY_PHONE_NUMBERS:
         envoye = False
         if media_url:
-            envoye = _send_media(phone, media_url, contenu)
+            envoye = _send_media(phone, media_url, contenu, media_type=media_type)
         if not envoye:
+            emoji_media = "🎥" if media_type == "video" else "📸"
             contenu_fallback = (
-                f"{contenu}\n\n📸 Photo : {media_url}" if media_url else contenu
+                f"{contenu}\n\n{emoji_media} Média : {media_url}" if media_url else contenu
             )
             envoye = _send_text(phone, contenu_fallback)
         if envoye:
