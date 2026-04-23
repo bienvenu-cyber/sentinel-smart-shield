@@ -336,11 +336,35 @@ def main():
             break
 
         if key == ord("a") or key == ord("A"):
-            print("🔔 Touche A pressée → capture + envoi de l'alerte...")
-            send_whatsapp_alert(
-                message="🚨 *DETECTION SIMULEE*\n📷 Webcam Mac (demo locale)",
-                frame=frame_clean,  # ← frame sans l'overlay vert
+            print("🔔 Touche A pressée → analyse IA simulée + envoi...")
+            detection = simulate_ai_detection()
+            print(
+                f"   🧠 IA → {detection['label_fr']} "
+                f"({int(detection['score']*100)}%) zone={detection['zone']}"
             )
+
+            # Annotation de la frame envoyée : bbox + label + score (style Frigate/YOLO)
+            x1, y1, x2, y2 = detection["bbox"]
+            fh, fw = frame_clean.shape[:2]
+            x1, x2 = min(x1, fw - 1), min(x2, fw - 1)
+            y1, y2 = min(y1, fh - 1), min(y2, fh - 1)
+            cv2.rectangle(frame_clean, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            etiquette = f"{detection['label_en']} {int(detection['score']*100)}%"
+            (tw, th), _ = cv2.getTextSize(etiquette, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(frame_clean, (x1, y1 - th - 8), (x1 + tw + 8, y1), (0, 0, 255), -1)
+            cv2.putText(
+                frame_clean, etiquette, (x1 + 4, y1 - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2,
+            )
+            # Bandeau horodatage + caméra en haut de l'image
+            bandeau = f"{CAMERA_NAME} | {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+            cv2.rectangle(frame_clean, (0, 0), (fw, 28), (0, 0, 0), -1)
+            cv2.putText(
+                frame_clean, bandeau, (8, 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1,
+            )
+
+            send_whatsapp_alert(frame=frame_clean, detection=detection)
 
     cap.release()
     cv2.destroyAllWindows()
