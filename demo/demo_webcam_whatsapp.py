@@ -30,6 +30,7 @@ Note sur l'envoi d'image :
 import os
 import sys
 import time
+import random
 from datetime import datetime
 
 import cv2
