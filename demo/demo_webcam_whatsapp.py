@@ -57,6 +57,59 @@ _last_alert_ts = 0.0
 SNAPSHOT_DIR = "snapshots"
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
+# ----------------------------------------------------------------
+# Simulation IA — génère une "détection" réaliste
+# (en prod, ces valeurs viennent de Frigate / YOLO / OpenVINO)
+# ----------------------------------------------------------------
+CAMERA_NAME = os.getenv("DEMO_CAMERA_NAME", "CAM-01 Entrée principale")
+DETECTION_LABELS = [
+    ("person",   "Personne",          ["entrée", "allée", "portail"]),
+    ("person",   "Personne",          ["jardin", "terrasse"]),
+    ("car",      "Véhicule",          ["allée", "parking"]),
+    ("motorcycle","Deux-roues",       ["portail", "rue"]),
+]
+
+def simulate_ai_detection() -> dict:
+    """Simule une détection IA (label, score, zone, bbox)."""
+    label_en, label_fr, zones = random.choice(DETECTION_LABELS)
+    return {
+        "label_en": label_en,
+        "label_fr": label_fr,
+        "score": round(random.uniform(0.82, 0.98), 2),
+        "zone": random.choice(zones),
+        "bbox": [
+            random.randint(40, 200),
+            random.randint(40, 200),
+            random.randint(220, 480),
+            random.randint(220, 440),
+        ],
+        "event_id": f"evt_{int(time.time())}_{random.randint(1000, 9999)}",
+    }
+
+
+def build_alert_caption(detection: dict, camera: str = CAMERA_NAME) -> str:
+    """Construit une légende WhatsApp standard exploitable par le responsable sécurité."""
+    now = datetime.now()
+    date_str = now.strftime("%d/%m/%Y")
+    heure_str = now.strftime("%H:%M:%S")
+    score_pct = int(detection["score"] * 100)
+    x1, y1, x2, y2 = detection["bbox"]
+
+    return (
+        f"🚨 *ALERTE SÉCURITÉ — DÉTECTION IA*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📷 Caméra     : *{camera}*\n"
+        f"🏷️  Détection  : *{detection['label_fr']}* (`{detection['label_en']}`)\n"
+        f"🎯 Confiance  : *{score_pct}%*\n"
+        f"📍 Zone       : {detection['zone']}\n"
+        f"📐 Position   : [{x1},{y1}]→[{x2},{y2}]\n"
+        f"🕐 Horodatage : {date_str} à {heure_str}\n"
+        f"🆔 Event ID   : `{detection['event_id']}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ Action recommandée : vérifier le flux live et confirmer."
+    )
+
+
 
 # ----------------------------------------------------------------
 # Upload public d'image — essaie plusieurs services en cascade
