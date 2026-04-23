@@ -222,14 +222,15 @@ def _send_text(phone: str, content: str) -> bool:
 # Fonction principale : envoi alerte (avec image si fournie)
 # ----------------------------------------------------------------
 def send_whatsapp_alert(
-    message: str = "🚨 Alerte test depuis la webcam Mac",
+    message: str | None = None,
     frame=None,
+    detection: dict | None = None,
 ) -> bool:
     """
     Envoie une alerte WhatsApp à tous les numéros configurés.
-    - Si `frame` (image OpenCV/numpy) est fournie : sauvegarde locale,
-      upload public, envoi en image avec légende.
-    - Sinon : envoi texte seul.
+    - Si `detection` est fournie : génère une légende standard IA.
+    - Sinon : utilise `message` (ou un message par défaut).
+    - Si `frame` est fournie : sauvegarde + upload + envoi en image WhatsApp.
     Retourne True si au moins un envoi a réussi.
     """
     global _last_alert_ts
@@ -249,8 +250,12 @@ def send_whatsapp_alert(
         print(f"⏳ Cooldown actif — réessaye dans {restant}s")
         return False
 
-    horodatage = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    contenu = f"{message}\n🕐 {horodatage}"
+    # Légende : détection IA simulée OU message libre
+    if detection is not None:
+        contenu = build_alert_caption(detection)
+    else:
+        horodatage = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        contenu = f"{message or '🚨 Alerte'}\n🕐 {horodatage}"
 
     # 1) Si on a une frame → sauvegarde + upload public
     media_url = None
