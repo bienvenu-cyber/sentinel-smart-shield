@@ -56,6 +56,11 @@ WAPIWAY_SESSION_ID = os.getenv("WAPIWAY_SESSION_ID", "")
 COOLDOWN_SECONDS = 30
 _last_alert_ts = 0.0
 
+# Délai d'auto-extinction de la webcam après une alerte (secondes)
+WEBCAM_OFF_DELAY = int(os.getenv("WEBCAM_OFF_DELAY", "5"))
+# Nombre de frames à "chauffer" avant capture (capteur s'auto-règle)
+WEBCAM_WARMUP_FRAMES = int(os.getenv("WEBCAM_WARMUP_FRAMES", "8"))
+
 # Dossier où on sauvegarde les snapshots avant upload
 SNAPSHOT_DIR = "snapshots"
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
