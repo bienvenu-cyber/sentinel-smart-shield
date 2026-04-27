@@ -40,6 +40,12 @@ import cv2
 import requests
 from dotenv import load_dotenv
 
+from ui_console import (
+    header, panel, divider, blank, hint,
+    ok, fail, warn, info, step, ai, cam, video, send, save,
+    Spinner, FG_CYAN, FG_PINK, FG_ORANGE, FG_PURPLE, FG_GREEN, FG_DIM, FG_MUTED, FG_TEXT, RESET, BOLD,
+)
+
 # --- Configuration (lue depuis variables d'env ou .env local) ---
 load_dotenv()
 
@@ -136,42 +142,44 @@ def upload_image_public(filepath: str) -> str | None:
     # --- Essai 1 : catbox.moe (gratuit, anonyme, fichiers permanents) ---
     try:
         with open(filepath, "rb") as f:
-            resp = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": f},
-                headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
-                timeout=30,
-            )
+            with Spinner("Upload image vers catbox.moe…", indent=1):
+                resp = requests.post(
+                    "https://catbox.moe/user/api.php",
+                    data={"reqtype": "fileupload"},
+                    files={"fileToUpload": f},
+                    headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
+                    timeout=30,
+                )
         if resp.status_code == 200 and resp.text.startswith("http"):
             url = resp.text.strip()
-            print(f"   📤 Image uploadée (catbox) : {url}")
+            send(f"Image hébergée  {FG_DIM}{url}{RESET}", indent=1)
             return url
-        print(f"   ⚠️ catbox a refusé : {resp.status_code} {resp.text[:200]}")
+        warn(f"catbox refusé ({resp.status_code})", indent=1)
     except Exception as e:
-        print(f"   ⚠️ Exception catbox : {e}")
+        warn(f"catbox exception : {e}", indent=1)
 
     # --- Essai 2 : tmpfiles.org (fallback, fichiers gardés ~1h) ---
     try:
         with open(filepath, "rb") as f:
-            resp = requests.post(
-                "https://tmpfiles.org/api/v1/upload",
-                files={"file": f},
-                timeout=30,
-            )
+            with Spinner("Fallback upload vers tmpfiles.org…", indent=1):
+                resp = requests.post(
+                    "https://tmpfiles.org/api/v1/upload",
+                    files={"file": f},
+                    timeout=30,
+                )
         if resp.status_code == 200:
             data = resp.json()
             raw_url = data.get("data", {}).get("url", "")
             # tmpfiles renvoie une page HTML, on convertit en lien direct image
             if raw_url:
                 direct_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-                print(f"   📤 Image uploadée (tmpfiles) : {direct_url}")
+                send(f"Image hébergée  {FG_DIM}{direct_url}{RESET}", indent=1)
                 return direct_url
-        print(f"   ❌ tmpfiles a refusé : {resp.status_code} {resp.text[:200]}")
+        fail(f"tmpfiles refusé ({resp.status_code})", indent=1)
     except Exception as e:
-        print(f"   ❌ Exception tmpfiles : {e}")
+        fail(f"tmpfiles exception : {e}", indent=1)
 
-    print("   ❌ Tous les hébergeurs ont échoué — fallback texte")
+    fail("Tous les hébergeurs ont échoué — fallback texte", indent=1)
     return None
 
 
@@ -182,22 +190,22 @@ def upload_video_public(filepath: str) -> str | None:
     """Upload une vidéo sur catbox.moe et retourne l'URL publique."""
     try:
         size_mo = os.path.getsize(filepath) / (1024 * 1024)
-        print(f"   📤 Upload vidéo ({size_mo:.1f} Mo) sur catbox...")
         with open(filepath, "rb") as f:
-            resp = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": f},
-                headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
-                timeout=120,
-            )
+            with Spinner(f"Upload vidéo ({size_mo:.1f} Mo) → catbox.moe…", color=FG_PINK, indent=1):
+                resp = requests.post(
+                    "https://catbox.moe/user/api.php",
+                    data={"reqtype": "fileupload"},
+                    files={"fileToUpload": f},
+                    headers={"User-Agent": "demo-webcam-whatsapp/1.0"},
+                    timeout=120,
+                )
         if resp.status_code == 200 and resp.text.startswith("http"):
             url = resp.text.strip()
-            print(f"   ✅ Vidéo uploadée : {url}")
+            send(f"Vidéo hébergée  {FG_DIM}{url}{RESET}", indent=1)
             return url
-        print(f"   ❌ catbox a refusé la vidéo : {resp.status_code} {resp.text[:200]}")
+        fail(f"catbox refusé ({resp.status_code})", indent=1)
     except Exception as e:
-        print(f"   ❌ Exception upload vidéo : {e}")
+        fail(f"Upload vidéo exception : {e}", indent=1)
     return None
 
 
@@ -218,17 +226,18 @@ def _send_media(phone: str, media_url: str, caption: str, media_type: str = "ima
     if WAPIWAY_SESSION_ID:
         payload["session_id"] = WAPIWAY_SESSION_ID
     try:
-        resp = requests.post(
-            f"{WAPIWAY_BASE_URL}/messages/send-media",
-            headers=headers, json=payload, timeout=30,
-        )
+        with Spinner(f"Envoi {media_type} → +{phone}…", indent=1):
+            resp = requests.post(
+                f"{WAPIWAY_BASE_URL}/messages/send-media",
+                headers=headers, json=payload, timeout=30,
+            )
         if resp.status_code in (200, 202):
-            print(f"✅ {media_type.capitalize()}+texte envoyés à {phone}")
+            ok(f"{media_type.capitalize()} + légende livrés  {FG_DIM}→ +{phone}{RESET}", indent=1)
             return True
-        print(f"❌ Erreur média {phone}: {resp.status_code} {resp.text[:200]}")
+        fail(f"WapiWay refusé +{phone} ({resp.status_code})", indent=1)
         return False
     except Exception as e:
-        print(f"❌ Exception média {phone}: {e}")
+        fail(f"WapiWay exception +{phone} : {e}", indent=1)
         return False
 
 
@@ -244,17 +253,18 @@ def _send_text(phone: str, content: str) -> bool:
     if WAPIWAY_SESSION_ID:
         payload["session_id"] = WAPIWAY_SESSION_ID
     try:
-        resp = requests.post(
-            f"{WAPIWAY_BASE_URL}/messages/send-text",
-            headers=headers, json=payload, timeout=10,
-        )
+        with Spinner(f"Envoi texte → +{phone}…", indent=1):
+            resp = requests.post(
+                f"{WAPIWAY_BASE_URL}/messages/send-text",
+                headers=headers, json=payload, timeout=10,
+            )
         if resp.status_code in (200, 202):
-            print(f"✅ Texte envoyé à {phone}")
+            ok(f"Texte livré  {FG_DIM}→ +{phone}{RESET}", indent=1)
             return True
-        print(f"❌ Erreur texte {phone}: {resp.status_code} {resp.text[:200]}")
+        fail(f"WapiWay texte refusé +{phone} ({resp.status_code})", indent=1)
         return False
     except Exception as e:
-        print(f"❌ Exception texte {phone}: {e}")
+        fail(f"WapiWay texte exception +{phone} : {e}", indent=1)
         return False
 
 
@@ -279,17 +289,17 @@ def send_whatsapp_alert(
 
     # Vérifs config
     if not WAPIWAY_API_KEY:
-        print("❌ WAPIWAY_API_KEY manquante (créer un .env)")
+        fail("WAPIWAY_API_KEY manquante — créer un .env")
         return False
     if not WAPIWAY_PHONE_NUMBERS:
-        print("❌ WAPIWAY_PHONE_NUMBERS manquant (créer un .env)")
+        fail("WAPIWAY_PHONE_NUMBERS manquant — créer un .env")
         return False
 
     # Cooldown anti-spam
     now = time.time()
     if (now - _last_alert_ts) < COOLDOWN_SECONDS:
         restant = int(COOLDOWN_SECONDS - (now - _last_alert_ts))
-        print(f"⏳ Cooldown actif — réessaye dans {restant}s")
+        warn(f"Cooldown actif — réessaye dans {restant}s")
         return False
 
     # Légende : détection IA simulée OU message libre
@@ -310,7 +320,7 @@ def send_whatsapp_alert(
         snap_path = os.path.join(SNAPSHOT_DIR, f"alerte_{ts}.jpg")
         # Compression JPEG qualité 85 → image légère mais nette
         cv2.imwrite(snap_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        print(f"   💾 Frame sauvegardée : {snap_path}")
+        save(f"Snapshot enregistré  {FG_DIM}{snap_path}{RESET}", indent=1)
         media_url = upload_image_public(snap_path)
 
     # 2) Envoi à chaque destinataire
@@ -367,49 +377,46 @@ def capturer_frame_silencieux():
     nette après warmup, puis libère la webcam au bout de WEBCAM_OFF_DELAY.
     Retourne la frame ou None.
     """
-    print(f"   📷 Activation webcam (silencieuse, {WEBCAM_OFF_DELAY}s)...")
-    # macOS peut mettre 1-2s à relâcher la webcam entre deux ouvertures
-    # → on retente plusieurs fois avec un petit délai
+    cam(f"Activation webcam silencieuse  {FG_DIM}({WEBCAM_OFF_DELAY}s){RESET}", indent=1)
     cap = None
-    for tentative in range(5):
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            break
-        cap.release()
-        time.sleep(0.5)
+    with Spinner("Ouverture du flux vidéo…", color=FG_ORANGE, indent=1):
+        for tentative in range(5):
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                break
+            cap.release()
+            time.sleep(0.5)
     if cap is None or not cap.isOpened():
-        print("   ❌ Impossible d'ouvrir la webcam (occupée par une autre app ?).")
+        fail("Webcam injoignable (occupée par une autre app ?)", indent=1)
         return None
     try:
-        # Warmup tolérant : on lit jusqu'à WEBCAM_WARMUP_FRAMES frames valides,
-        # avec max 30 essais (capteur qui se réveille après libération macOS)
         frame = None
         valides = 0
         essais = 0
-        while valides < WEBCAM_WARMUP_FRAMES and essais < 30:
-            ret, f = cap.read()
-            essais += 1
-            if ret and f is not None:
-                frame = f
-                valides += 1
-            else:
-                time.sleep(0.1)
+        with Spinner("Warmup capteur…", color=FG_ORANGE, indent=1):
+            while valides < WEBCAM_WARMUP_FRAMES and essais < 30:
+                ret, f = cap.read()
+                essais += 1
+                if ret and f is not None:
+                    frame = f
+                    valides += 1
+                else:
+                    time.sleep(0.1)
         if frame is None:
-            print(f"   ❌ Aucune frame lue après {essais} essais.")
+            fail(f"Aucune frame valide après {essais} essais", indent=1)
             return None
-        # On garde la webcam active quelques secondes (réalisme + buffer)
-        t_fin = time.time() + WEBCAM_OFF_DELAY
-        while time.time() < t_fin:
-            ret, f = cap.read()
-            if ret and f is not None:
-                frame = f  # on garde toujours la dernière frame valide
-            time.sleep(0.1)
+        with Spinner("Capture en cours…", color=FG_ORANGE, indent=1):
+            t_fin = time.time() + WEBCAM_OFF_DELAY
+            while time.time() < t_fin:
+                ret, f = cap.read()
+                if ret and f is not None:
+                    frame = f
+                time.sleep(0.1)
         return frame
     finally:
         cap.release()
-        # Petit délai pour laisser macOS libérer le device proprement
         time.sleep(0.3)
-        print("   📴 Webcam coupée.")
+        info("Webcam libérée", indent=1)
 
 
 class _ClavierNonBloquant:
@@ -431,9 +438,11 @@ class _ClavierNonBloquant:
 def declencher_alerte():
     """Capture silencieuse + analyse IA simulée + envoi WhatsApp."""
     detection = simulate_ai_detection()
-    print(
-        f"   🧠 IA → {detection['label_fr']} "
-        f"({int(detection['score']*100)}%) zone={detection['zone']}"
+    ai(
+        f"Détection : {BOLD}{detection['label_fr']}{RESET}{FG_TEXT}  "
+        f"{FG_GREEN}{int(detection['score']*100)}%{FG_TEXT}  "
+        f"{FG_DIM}zone={detection['zone']}{RESET}",
+        indent=1,
     )
     frame = capturer_frame_silencieux()
     if frame is None:
@@ -449,27 +458,29 @@ def enregistrer_video_silencieux(detection: dict) -> str | None:
     avec annotations IA en surimpression à chaque frame. Renvoie le chemin
     du fichier .mp4 créé, ou None si échec.
     """
-    print(f"   🎥 Enregistrement vidéo ({VIDEO_DURATION}s @ {VIDEO_FPS}fps)...")
+    video(f"Enregistrement vidéo  {FG_DIM}{VIDEO_DURATION}s @ {VIDEO_FPS}fps{RESET}", indent=1)
     cap = None
-    for tentative in range(5):
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            break
-        cap.release()
-        time.sleep(0.5)
+    with Spinner("Ouverture du flux vidéo…", color=FG_PINK, indent=1):
+        for tentative in range(5):
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                break
+            cap.release()
+            time.sleep(0.5)
     if cap is None or not cap.isOpened():
-        print("   ❌ Impossible d'ouvrir la webcam (occupée ?).")
+        fail("Webcam injoignable (occupée ?)", indent=1)
         return None
 
     try:
         # Warmup capteur
-        for _ in range(WEBCAM_WARMUP_FRAMES):
-            cap.read()
+        with Spinner("Warmup capteur…", color=FG_PINK, indent=1):
+            for _ in range(WEBCAM_WARMUP_FRAMES):
+                cap.read()
 
         # Récupération résolution réelle
         ret, frame0 = cap.read()
         if not ret or frame0 is None:
-            print("   ❌ Aucune frame lue pour démarrer la vidéo.")
+            fail("Aucune frame de démarrage", indent=1)
             return None
         h, w = frame0.shape[:2]
 
@@ -479,42 +490,44 @@ def enregistrer_video_silencieux(detection: dict) -> str | None:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(video_path, fourcc, VIDEO_FPS, (w, h))
         if not writer.isOpened():
-            print("   ❌ Impossible d'initialiser l'encodeur vidéo.")
+            fail("Encodeur vidéo indisponible", indent=1)
             return None
 
         nb_frames_cible = VIDEO_DURATION * VIDEO_FPS
         ecrites = 0
         t_debut = time.time()
-        # Chrono de la durée écoulée (pour bandeau)
-        while ecrites < nb_frames_cible:
-            ret, f = cap.read()
-            if not ret or f is None:
-                time.sleep(0.02)
-                continue
-            # Annotation live : bbox + label + horodatage à chaque frame
-            annoter_frame(f, detection)
-            elapsed = time.time() - t_debut
-            cv2.putText(
-                f, f"REC {elapsed:0.1f}s", (f.shape[1] - 130, 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2,
-            )
-            writer.write(f)
-            ecrites += 1
+        with Spinner(f"REC  0.0 / {VIDEO_DURATION:.1f}s…", color=FG_PINK, indent=1) as sp:
+            while ecrites < nb_frames_cible:
+                ret, f = cap.read()
+                if not ret or f is None:
+                    time.sleep(0.02)
+                    continue
+                annoter_frame(f, detection)
+                elapsed = time.time() - t_debut
+                cv2.putText(
+                    f, f"REC {elapsed:0.1f}s", (f.shape[1] - 130, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2,
+                )
+                writer.write(f)
+                ecrites += 1
+                sp.update(f"REC  {elapsed:0.1f} / {VIDEO_DURATION:.1f}s  ·  frame {ecrites}/{nb_frames_cible}")
         writer.release()
-        print(f"   💾 Vidéo sauvegardée : {video_path} ({ecrites} frames)")
+        save(f"Vidéo enregistrée  {FG_DIM}{video_path}  ·  {ecrites} frames{RESET}", indent=1)
         return video_path
     finally:
         cap.release()
         time.sleep(0.3)
-        print("   📴 Webcam coupée.")
+        info("Webcam libérée", indent=1)
 
 
 def declencher_alerte_video():
     """Enregistrement vidéo silencieux + analyse IA simulée + envoi WhatsApp."""
     detection = simulate_ai_detection()
-    print(
-        f"   🧠 IA → {detection['label_fr']} "
-        f"({int(detection['score']*100)}%) zone={detection['zone']}"
+    ai(
+        f"Détection : {BOLD}{detection['label_fr']}{RESET}{FG_TEXT}  "
+        f"{FG_GREEN}{int(detection['score']*100)}%{FG_TEXT}  "
+        f"{FG_DIM}zone={detection['zone']}{RESET}",
+        indent=1,
     )
     video_path = enregistrer_video_silencieux(detection)
     if video_path is None:
@@ -524,27 +537,26 @@ def declencher_alerte_video():
 
 
 def main():
-    print("=" * 56)
-    print("🛡️  SENTINEL — Démo locale (mode silencieux)")
-    print("=" * 56)
-    print(f"   📷 Caméra simulée : {CAMERA_NAME}")
-    print(f"   📞 Destinataires  : {len(WAPIWAY_PHONE_NUMBERS)} numéro(s)")
-    print(f"   ⏱️  Auto-extinction webcam : {WEBCAM_OFF_DELAY}s")
-    print(f"   🎥 Durée vidéo (touche X) : {VIDEO_DURATION}s @ {VIDEO_FPS}fps")
-    print("-" * 56)
-    print("   [A] = alerte PHOTO (capture + WhatsApp)")
-    print("   [X] = alerte VIDÉO (enregistrement + WhatsApp)")
-    print("   [Q] = quitter")
-    print("=" * 56)
+    header("SENTINEL  ◆  AI Security Bridge", "Démo locale · webcam → WhatsApp")
+    panel([
+        ("Caméra",         CAMERA_NAME),
+        ("Destinataires",  f"{len(WAPIWAY_PHONE_NUMBERS)} numéro(s)"),
+        ("Auto-extinction", f"{WEBCAM_OFF_DELAY}s"),
+        ("Vidéo",          f"{VIDEO_DURATION}s @ {VIDEO_FPS}fps"),
+        ("Cooldown",       f"{COOLDOWN_SECONDS}s entre alertes"),
+    ])
+    blank()
+    hint(f"[A] alerte photo   ·   [X] alerte vidéo   ·   [Q] quitter")
+    divider()
 
     # Si stdin n'est pas un TTY (ex: lancé via cron) → mode démon, pas d'input
     if not sys.stdin.isatty():
-        print("ℹ️ stdin non-TTY → mode démon (Ctrl+C pour arrêter)")
+        info("stdin non-TTY → mode démon (Ctrl+C pour arrêter)")
         try:
             while True:
                 time.sleep(60)
         except KeyboardInterrupt:
-            print("👋 Arrêt.")
+            info("Arrêt.")
         return
 
     try:
@@ -554,19 +566,24 @@ def main():
                 if touche is None:
                     continue
                 if touche.lower() == "q":
-                    print("🛑 Sortie demandée.")
+                    info("Sortie demandée.")
                     break
                 if touche.lower() == "a":
-                    print("🔔 Alerte PHOTO déclenchée → analyse IA + capture...")
+                    blank()
+                    step(f"{BOLD}Alerte PHOTO{RESET}{FG_TEXT}  ·  pipeline IA → capture → WhatsApp")
                     declencher_alerte()
-                    print("   ✅ Prêt pour la prochaine alerte ([A] / [Q])\n")
+                    ok("Prêt pour la prochaine alerte", indent=1)
+                    divider()
                 if touche.lower() == "x":
-                    print("🎬 Alerte VIDÉO déclenchée → analyse IA + enregistrement...")
+                    blank()
+                    step(f"{BOLD}Alerte VIDÉO{RESET}{FG_TEXT}  ·  pipeline IA → enregistrement → WhatsApp")
                     declencher_alerte_video()
-                    print("   ✅ Prêt pour la prochaine alerte ([A] / [X] / [Q])\n")
+                    ok("Prêt pour la prochaine alerte", indent=1)
+                    divider()
     except KeyboardInterrupt:
-        print("\n🛑 Interrompu.")
-    print("👋 Terminé.")
+        blank()
+        info("Interrompu.")
+    info("Terminé.")
 
 
 if __name__ == "__main__":
