@@ -79,10 +79,7 @@ LABEL_FR = {
 
 # Nom lisible des caméras (clé = nom Frigate, valeur = libellé humain)
 CAMERA_DISPLAY = {
-    "entree": "CAM-01 Entrée principale",
-    "entrepot": "CAM-02 Entrepôt",
-    "parking": "CAM-03 Parking",
-    "nouvelle": "CAM-04 Nouvelle caméra",
+    "ezviz": "CAM-01 EZVIZ CS-C6N",
 }
 
 # ----------------------------------------------------------------
