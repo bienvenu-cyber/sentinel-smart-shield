@@ -51,54 +51,16 @@ record:
 # --- Caméras ---
 cameras:
 
-  cam_entree:
+  # --- Caméra EZVIZ CS-C6N (1080p H.264) ---
+  # Flux RTSP : rtsp://admin:<CODE_VERIF>@<IP>:554/Streaming/Channels/101
+  cam_ezviz:
     ffmpeg:
       inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_ENTREE_IP}:{CAM_ENTREE_PORT}{CAM_ENTREE_PATH}
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_EZVIZ_IP}:{CAM_EZVIZ_PORT}{CAM_EZVIZ_PATH}
           roles: [detect, record]
+          input_args: preset-rtsp-restream
     detect:
       enabled: true
-      width: 1280
-      height: 720
-      fps: 5
-
-  cam_entrepot:
-    ffmpeg:
-      inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_ENTREPOT_IP}:{CAM_ENTREPOT_PORT}{CAM_ENTREPOT_PATH}
-          roles: [detect, record]
-    detect:
-      enabled: true
-      width: 1280
-      height: 720
-      fps: 5
-    zones:
-      zone_interdite:
-        coordinates: 128,72,512,72,512,648,128,648
-        objects:
-          - person
-
-  cam_parking:
-    ffmpeg:
-      inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_PARKING_IP}:{CAM_PARKING_PORT}{CAM_PARKING_PATH}
-          roles: [detect, record]
-    detect:
-      enabled: true
-      width: 1280
-      height: 720
-      fps: 5
-
-  # --- Modèle pour nouvelle caméra ---
-  # Dupliquer ce bloc, renommer (cam_xxx) et ajouter les variables
-  # CAM_XXX_IP / CAM_XXX_PORT / CAM_XXX_PATH dans le .env
-  cam_nouvelle:
-    ffmpeg:
-      inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_NOUVELLE_IP}:{CAM_NOUVELLE_PORT}{CAM_NOUVELLE_PATH}
-          roles: [detect, record]
-    detect:
-      enabled: true
-      width: 1280
-      height: 720
+      width: 1920
+      height: 1080
       fps: 5
