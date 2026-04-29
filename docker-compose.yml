@@ -30,6 +30,8 @@ services:
       - CAM_EZVIZ_IP=${CAM_EZVIZ_IP}
       - CAM_EZVIZ_PORT=${CAM_EZVIZ_PORT}
       - CAM_EZVIZ_PATH=${CAM_EZVIZ_PATH}
+    env_file:
+      - .env
     depends_on:
       - mosquitto
 
