@@ -56,7 +56,7 @@ cameras:
   cam_ezviz:
     ffmpeg:
       inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{CAM_EZVIZ_IP}:{CAM_EZVIZ_PORT}{CAM_EZVIZ_PATH}
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{FRIGATE_CAM_EZVIZ_IP}:{FRIGATE_CAM_EZVIZ_PORT}{FRIGATE_CAM_EZVIZ_PATH}
           roles: [detect, record]
           input_args: preset-rtsp-restream
     detect:
