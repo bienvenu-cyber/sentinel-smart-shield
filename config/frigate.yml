@@ -28,16 +28,18 @@ objects:
   filters:
     person:
       min_score: 0.70
-      min_area: 8000
+      # min_area abaissée : 1500 px² ≈ silhouette de 40×40 px
+      # → détecte une personne même à mi-distance / en arrière-plan
+      min_area: 1500
     car:
       min_score: 0.65
-      min_area: 15000
+      min_area: 5000
     truck:
       min_score: 0.65
-      min_area: 20000
+      min_area: 8000
     motorcycle:
       min_score: 0.65
-      min_area: 8000
+      min_area: 3000
 
 snapshots:
   enabled: true
