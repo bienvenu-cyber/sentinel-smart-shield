@@ -1,7 +1,7 @@
 @echo off
 REM =============================================================
 REM apply-min-score.bat — Met a jour MIN_SCORE dans .env et
-REM redemarre le conteneur alertes pour appliquer le changement.
+REM recree le conteneur alertes pour recharger les variables d'environnement.
 REM
 REM Usage  : apply-min-score.bat            (defaut : 0.70)
 REM         apply-min-score.bat 0.65        (valeur personnalisee)
@@ -44,12 +44,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- Redemarrage du conteneur alertes ---
+REM --- Re-creation du conteneur alertes ---
 echo.
-echo Redemarrage du conteneur alertes...
-docker compose restart alertes
+echo Re-creation du conteneur alertes pour recharger .env...
+docker compose up -d --no-deps --force-recreate alertes
 if errorlevel 1 (
-    echo [ERREUR] Echec redemarrage conteneur
+    echo [ERREUR] Echec re-creation conteneur
     exit /b 1
 )
 
@@ -59,8 +59,11 @@ echo ------------------------------------------------------------
 echo  Verification (logs alertes - 15 dernieres lignes)
 echo ------------------------------------------------------------
 timeout /t 3 /nobreak >nul
-docker logs alertes --tail 15 | findstr /i "score min wapiway demarre"
+echo Valeur injectee dans le conteneur :
+docker exec alertes printenv MIN_SCORE
+echo.
+docker logs alertes --tail 30 | findstr /i "score min cooldown heures zones wapiway demarre"
 
 echo.
-echo [TERMINE] MIN_SCORE = %NEW_SCORE% applique et conteneur redemarre.
+echo [TERMINE] MIN_SCORE = %NEW_SCORE% applique et conteneur recree.
 endlocal
