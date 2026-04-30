@@ -26,6 +26,8 @@ import json
 import time
 import logging
 import tempfile
+import sqlite3
+import threading
 import requests
 import paho.mqtt.client as mqtt
 from datetime import datetime
@@ -58,6 +60,21 @@ MQTT_TOPIC = "frigate/events"
 MIN_SCORE = float(os.getenv("MIN_SCORE", "0.75"))
 TRACKED_LABELS = [l.strip() for l in os.getenv("TRACKED_LABELS", "person,car").split(",") if l.strip()]
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "60"))
+COOLDOWN_SECONDS_NIGHT = int(os.getenv("COOLDOWN_SECONDS_NIGHT", "30"))
+
+# --- Logique métier Tolaro (rôtisserie) ---
+BUSINESS_HOUR_START = int(os.getenv("BUSINESS_HOUR_START", "6"))
+BUSINESS_HOUR_END = int(os.getenv("BUSINESS_HOUR_END", "19"))
+BUSINESS_DAYS = {
+    int(d.strip())
+    for d in os.getenv("BUSINESS_DAYS", "0,1,2,3,4,5").split(",")
+    if d.strip().isdigit()
+}
+RESTRICTED_ZONES = {
+    z.strip()
+    for z in os.getenv("RESTRICTED_ZONES", "zone_restreinte").split(",")
+    if z.strip()
+}
 
 # Média
 # image | video | both
@@ -99,6 +116,58 @@ log = logging.getLogger("wapiway_bridge")
 # Anti-spam : dernier envoi par (caméra, label)
 last_alert: dict[str, float] = {}
 
+# ----------------------------------------------------------------
+# Journal SQLite des événements (pour le rapport matinal)
+# ----------------------------------------------------------------
+DB_PATH = "/app/logs/events.db"
+
+def db_init():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    con = sqlite3.connect(DB_PATH)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            event_id TEXT,
+            camera TEXT,
+            label TEXT,
+            score REAL,
+            zones TEXT,
+            mode TEXT,           -- 'jour' | 'nuit'
+            reason TEXT,         -- 'zone_interdite' | 'hors_horaires' | 'jour_normal'
+            sent INTEGER,        -- 1 si alerte envoyée, 0 si filtrée
+            filter_reason TEXT
+        )
+    """)
+    con.commit()
+    con.close()
+
+def db_log(event_id, camera, label, score, zones, mode, reason, sent, filter_reason=""):
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            "INSERT INTO events (ts,event_id,camera,label,score,zones,mode,reason,sent,filter_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (int(time.time()), event_id, camera, label, float(score),
+             ",".join(zones or []), mode, reason, 1 if sent else 0, filter_reason)
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        log.warning(f"⚠️ DB log échoué : {e}")
+
+
+# ----------------------------------------------------------------
+# Logique horaire : sommes-nous en heures ouvrées ?
+# ----------------------------------------------------------------
+def is_business_hours(now: datetime | None = None) -> bool:
+    """True si jour ouvré ET heure dans la plage [start, end[."""
+    n = now or datetime.now()
+    return (
+        n.weekday() in BUSINESS_DAYS
+        and BUSINESS_HOUR_START <= n.hour < BUSINESS_HOUR_END
+    )
+
 
 # ================================================================
 # 1) Caption standardisée (alignée sur la démo)
@@ -110,6 +179,8 @@ def build_alert_caption(
     zones: list[str],
     event_id: str,
     bbox: list[int] | None = None,
+    mode: str = "jour",
+    reason: str = "",
 ) -> str:
     """Construit une légende WhatsApp exploitable par le responsable sécurité."""
     now = datetime.now()
@@ -125,8 +196,17 @@ def build_alert_caption(
     )
     live_url = f"{FRIGATE_PUBLIC_URL}/cameras/{camera}"
 
+    # Bandeau de criticité selon le contexte
+    if reason == "zone_interdite":
+        bandeau = "🔴 *CRITIQUE — ZONE INTERDITE*"
+    elif mode == "nuit":
+        bandeau = "🟠 *MODE NUIT — DÉTECTION HORS HORAIRES*"
+    else:
+        bandeau = "🟡 *DÉTECTION JOUR*"
+
     return (
-        f"🚨 *ALERTE SÉCURITÉ — DÉTECTION IA*\n"
+        f"🚨 *ALERTE SÉCURITÉ — TOLARO GLOBAL*\n"
+        f"{bandeau}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📷 Caméra     : *{cam_display}*\n"
         f"🏷️  Détection  : *{label_fr}* (`{label_en}`)\n"
@@ -305,51 +385,64 @@ def envoyer_alerte(
     event_id: str,
     zones: list[str],
     bbox: list[int] | None = None,
+    mode: str = "jour",
+    reason: str = "",
 ):
-    """Télécharge le média Frigate, l'upload, puis envoie via WapiWay à tous les destinataires."""
-    caption = build_alert_caption(camera, label, score, zones, event_id, bbox)
+    """
+    Envoi intelligent en 2 phases :
+      1. Snapshot envoyé immédiatement (réactivité < 5s)
+      2. Clip vidéo envoyé en arrière-plan dès que Frigate l'a finalisé
+    """
+    caption = build_alert_caption(camera, label, score, zones, event_id, bbox, mode, reason)
 
-    # --- Étape 1 : préparer les médias selon ALERT_MEDIA_TYPE ---
-    medias: list[tuple[str, str]] = []  # liste de (media_url, media_type)
+    # --- Phase 1 : snapshot immédiat ---
+    image_url: str | None = None
+    snap_path = download_snapshot(event_id)
+    if snap_path:
+        image_url = upload_public(snap_path, kind="image")
+        try:
+            os.unlink(snap_path)
+        except OSError:
+            pass
 
-    if ALERT_MEDIA_TYPE in ("image", "both"):
-        snap_path = download_snapshot(event_id)
-        if snap_path:
-            url = upload_public(snap_path, kind="image")
-            try:
-                os.unlink(snap_path)
-            except OSError:
-                pass
-            if url:
-                medias.append((url, "image"))
-
-    if ALERT_MEDIA_TYPE in ("video", "both"):
-        clip_path = download_clip(event_id)
-        if clip_path:
-            url = upload_public(clip_path, kind="video")
-            try:
-                os.unlink(clip_path)
-            except OSError:
-                pass
-            if url:
-                medias.append((url, "video"))
-
-    # --- Étape 2 : envoi à chaque destinataire ---
+    sent_any = False
     for phone in WAPIWAY_PHONE_NUMBERS:
-        envoye_au_moins_un_media = False
-        for idx, (media_url, media_type) in enumerate(medias):
-            # Caption seulement sur le 1er média pour ne pas spammer
-            cap = caption if idx == 0 else ""
-            if send_media(phone, media_url, cap, media_type=media_type):
-                envoye_au_moins_un_media = True
-
-        # Fallback texte si AUCUN média n'a pu être envoyé
-        if not envoye_au_moins_un_media:
+        if image_url and send_media(phone, image_url, caption, media_type="image"):
+            sent_any = True
+        else:
             log.warning(f"⚠️ Fallback texte pour {phone}")
-            fallback = caption
-            if medias:
-                fallback += "\n\n📎 Média : " + medias[0][0]
-            send_text(phone, fallback)
+            send_text(phone, caption)
+            sent_any = True  # texte parti
+
+    # --- Phase 2 : clip vidéo en arrière-plan (non bloquant) ---
+    if ALERT_MEDIA_TYPE in ("video", "both"):
+        threading.Thread(
+            target=_send_clip_async,
+            args=(camera, label, event_id),
+            daemon=True,
+        ).start()
+
+    return sent_any
+
+
+def _send_clip_async(camera: str, label: str, event_id: str):
+    """Récupère le clip après finalisation Frigate puis l'envoie en suivant."""
+    try:
+        clip_path = download_clip(event_id)
+        if not clip_path:
+            return
+        url = upload_public(clip_path, kind="video")
+        try:
+            os.unlink(clip_path)
+        except OSError:
+            pass
+        if not url:
+            return
+        cap = f"🎬 Clip vidéo de l'alerte `{event_id}` ({camera} / {label})"
+        for phone in WAPIWAY_PHONE_NUMBERS:
+            send_media(phone, url, cap, media_type="video")
+    except Exception as e:
+        log.error(f"❌ Envoi clip async échoué pour {event_id}: {e}")
 
 
 # ================================================================
@@ -372,8 +465,6 @@ def on_message(client, userdata, msg):
         return
 
     event_type = payload.get("type", "")
-    # On déclenche sur 'new' (début de détection). 'end' permettrait d'avoir
-    # le clip directement dispo, mais retarderait l'alerte de plusieurs s.
     if event_type != "new":
         return
 
@@ -385,25 +476,54 @@ def on_message(client, userdata, msg):
     zones = after.get("current_zones", []) or []
     bbox = after.get("box") or after.get("region")  # [x,y,w,h] en général
 
-    # Filtrage
+    # --- Filtrage de base ---
     if label not in TRACKED_LABELS:
         return
     if score < MIN_SCORE:
         return
 
-    # Cooldown anti-spam
-    cache_key = f"{camera}_{label}"
+    # --- Logique intelligente : jour vs nuit + zones interdites ---
+    business = is_business_hours()
+    mode = "jour" if business else "nuit"
+    in_restricted = bool(set(zones) & RESTRICTED_ZONES)
+
+    if business:
+        # En heures ouvrées : opérateurs = normal.
+        # On alerte UNIQUEMENT si :
+        #   - personne dans une zone restreinte
+        #   - véhicule (car/truck/motorcycle) — toute arrivée véhicule = à signaler
+        if label == "person" and not in_restricted:
+            db_log(event_id, camera, label, score, zones, mode,
+                   "jour_normal", sent=False, filter_reason="personne_zone_autorisee")
+            log.debug(f"🟢 Jour ouvré, personne en zone autorisée — ignoré ({event_id})")
+            return
+        reason = "zone_interdite" if in_restricted else "vehicule_jour"
+    else:
+        # Hors heures ouvrées : TOUTE détection = alerte
+        reason = "hors_horaires"
+
+    # --- Cooldown (plus court la nuit) ---
+    cooldown = COOLDOWN_SECONDS if business else COOLDOWN_SECONDS_NIGHT
+    cache_key = f"{camera}_{label}_{reason}"
     now = time.time()
-    if cache_key in last_alert and (now - last_alert[cache_key]) < COOLDOWN_SECONDS:
+    if cache_key in last_alert and (now - last_alert[cache_key]) < cooldown:
+        db_log(event_id, camera, label, score, zones, mode, reason,
+               sent=False, filter_reason="cooldown")
         log.debug(f"⏳ Cooldown actif pour {cache_key}")
         return
     last_alert[cache_key] = now
 
-    log.info(f"🔔 Alerte : {label} ({score:.0%}) sur {camera} (event {event_id})")
+    log.info(
+        f"🔔 Alerte [{mode.upper()}/{reason}] : {label} ({score:.0%}) "
+        f"sur {camera} zones={zones} (event {event_id})"
+    )
     try:
-        envoyer_alerte(camera, label, score, event_id, zones, bbox)
+        sent = envoyer_alerte(camera, label, score, event_id, zones, bbox, mode, reason)
+        db_log(event_id, camera, label, score, zones, mode, reason, sent=sent)
     except Exception as e:
         log.exception(f"❌ Erreur traitement alerte {event_id}: {e}")
+        db_log(event_id, camera, label, score, zones, mode, reason,
+               sent=False, filter_reason=f"exception:{e}")
 
 
 def on_disconnect(client, userdata, rc):
@@ -424,8 +544,10 @@ def main():
         log.error(f"❌ ALERT_MEDIA_TYPE invalide : {ALERT_MEDIA_TYPE} (image|video|both)")
         sys.exit(1)
 
+    db_init()
+
     log.info("=" * 60)
-    log.info("🚀 SENTINEL — WapiWay Bridge démarré")
+    log.info("🚀 SENTINEL — WapiWay Bridge (Tolaro Global) démarré")
     log.info(f"   API WapiWay      : {WAPIWAY_BASE_URL}")
     log.info(f"   Frigate (interne): {FRIGATE_URL}")
     log.info(f"   Frigate (public) : {FRIGATE_PUBLIC_URL}")
@@ -433,7 +555,10 @@ def main():
     log.info(f"   Destinataires    : {len(WAPIWAY_PHONE_NUMBERS)} numéro(s)")
     log.info(f"   Labels suivis    : {TRACKED_LABELS}")
     log.info(f"   Score min        : {MIN_SCORE}")
-    log.info(f"   Cooldown         : {COOLDOWN_SECONDS}s")
+    log.info(f"   Cooldown jour    : {COOLDOWN_SECONDS}s")
+    log.info(f"   Cooldown nuit    : {COOLDOWN_SECONDS_NIGHT}s")
+    log.info(f"   Heures ouvrées   : {BUSINESS_HOUR_START}h–{BUSINESS_HOUR_END}h, jours={sorted(BUSINESS_DAYS)}")
+    log.info(f"   Zones interdites : {sorted(RESTRICTED_ZONES)}")
     log.info(f"   Type d'alerte    : {ALERT_MEDIA_TYPE.upper()}")
     if ALERT_MEDIA_TYPE in ("video", "both"):
         log.info(f"   Attente clip     : {VIDEO_WAIT_SECONDS}s")
