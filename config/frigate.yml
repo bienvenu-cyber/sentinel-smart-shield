@@ -23,29 +23,37 @@ objects:
   track:
     - person
     - car
+    - truck
+    - motorcycle
   filters:
     person:
-      min_score: 0.6
-      min_area: 5000
+      min_score: 0.70
+      min_area: 8000
     car:
-      min_score: 0.6
-      min_area: 10000
+      min_score: 0.65
+      min_area: 15000
+    truck:
+      min_score: 0.65
+      min_area: 20000
+    motorcycle:
+      min_score: 0.65
+      min_area: 8000
 
 snapshots:
   enabled: true
   bounding_box: true
   timestamp: true
   retain:
-    default: 7
+    default: 14
 
 record:
   enabled: true
   retain:
-    days: 7
+    days: 14
     mode: motion
   events:
     retain:
-      default: 14
+      default: 30
       mode: active_objects
 
 # --- Caméras ---
@@ -64,3 +72,20 @@ cameras:
       width: 1920
       height: 1080
       fps: 5
+    # --- Zones à dessiner via l'UI Frigate (Edit zones) ---
+    # zone_travail    : surface où les opérateurs ont le droit d'être en journée
+    # zone_restreinte : bureau / stockage produits finis (interdit même de jour)
+    # zone_entree     : porte d'accès principale (toute personne = à signaler la nuit)
+    zones:
+      zone_travail:
+        coordinates: 0,1080,1920,1080,1920,400,0,400
+        objects:
+          - person
+      zone_restreinte:
+        coordinates: 0,400,960,400,960,0,0,0
+        objects:
+          - person
+      zone_entree:
+        coordinates: 960,400,1920,400,1920,0,960,0
+        objects:
+          - person
