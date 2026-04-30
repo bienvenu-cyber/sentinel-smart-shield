@@ -47,7 +47,7 @@ if errorlevel 1 (
 REM --- Re-creation du conteneur alertes ---
 echo.
 echo Re-creation du conteneur alertes pour recharger .env...
-docker compose up -d --no-deps --force-recreate alertes
+docker compose up -d --no-deps --force-recreate --no-build alertes
 if errorlevel 1 (
     echo [ERREUR] Echec re-creation conteneur
     exit /b 1
