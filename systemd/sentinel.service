@@ -1,0 +1,20 @@
+[Unit]
+Description=Sentinel - Stack de vidéosurveillance (Frigate + MQTT + Alertes)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/sentinel
+# Démarrage de la stack complète
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+# Arrêt propre
+ExecStop=/usr/bin/docker compose down
+# Rechargement (git pull + recreate)
+ExecReload=/usr/bin/docker compose up -d --force-recreate
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

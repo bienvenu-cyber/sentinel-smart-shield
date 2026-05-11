@@ -119,6 +119,51 @@ docker compose pull
 docker compose up -d --build
 ```
 
+## 🔁 Démarrage automatique au boot (Linux/systemd)
+
+Pour que la stack démarre toute seule au boot du serveur **et** que chaque
+conteneur (notamment Frigate) soit relancé s'il tombe :
+
+### 1. Politique de redémarrage Docker
+
+Tous les services dans `docker-compose.yml` ont déjà `restart: always`.
+Docker relance donc automatiquement un conteneur qui crashe ou s'arrête
+anormalement, tant que le démon Docker tourne.
+
+### 2. Installer le service systemd
+
+```bash
+sudo ./install-autostart.sh
+```
+
+Ce script :
+- active `docker.service` au boot
+- installe `/etc/systemd/system/sentinel.service`
+- active `sentinel.service` au boot (qui exécute `docker compose up -d`)
+
+### 3. Vérifier
+
+```bash
+sudo systemctl status sentinel
+sudo reboot          # test grandeur nature
+# après le reboot :
+docker compose ps    # tout doit être "Up"
+```
+
+### Commandes utiles
+
+| Action | Commande |
+|--------|----------|
+| Démarrer maintenant | `sudo systemctl start sentinel` |
+| Arrêter la stack | `sudo systemctl stop sentinel` |
+| Voir l'état | `sudo systemctl status sentinel` |
+| Recréer les conteneurs | `sudo systemctl reload sentinel` |
+| Désactiver l'autostart | `sudo systemctl disable sentinel` |
+
+> 💡 Sous Windows (Docker Desktop), il n'y a pas besoin de systemd :
+> activer **Settings → General → Start Docker Desktop when you sign in**
+> et garder `restart: always` suffit.
+
 ## ➕ Ajouter une nouvelle caméra (après déploiement)
 
 ### 1. Connecter la caméra au WiFi de l'entreprise
