@@ -76,6 +76,29 @@ RESTRICTED_ZONES = {
     if z.strip()
 }
 
+# ----------------------------------------------------------------
+# RÈGLE ACTIVE (Option A — demandée par le DG, mai 2026) :
+#   "Alerter UNIQUEMENT si un mouvement est détecté APRÈS au moins
+#    1 h d'inactivité totale sur la caméra."
+#
+# Justification : les caméras sont à l'intérieur de la rôtisserie,
+# seuls les employés circulent en journée → 99 % des détections sont
+# normales. Une reprise d'activité après une longue accalmie (pause,
+# fermeture, nuit, week-end) est en revanche TOUJOURS suspecte.
+#
+# Seuil ajustable via .env (en secondes). 3600 = 1 h pile.
+# ----------------------------------------------------------------
+INACTIVITY_THRESHOLD_SECONDS = int(os.getenv("INACTIVITY_THRESHOLD_SECONDS", "3600"))
+# Anti-rafale : une fois l'alerte "reprise d'activité" envoyée, on
+# attend ce délai avant de pouvoir en redéclencher une autre sur la
+# même caméra (sinon chaque mouvement consécutif redéclencherait).
+REACTIVATION_COOLDOWN_SECONDS = int(os.getenv("REACTIVATION_COOLDOWN_SECONDS", "300"))
+
+# Mémoire en RAM : dernière détection vue par caméra (timestamp epoch)
+last_detection_ts: dict[str, float] = {}
+# Mémoire en RAM : dernière alerte "reprise d'activité" par caméra
+last_reactivation_alert: dict[str, float] = {}
+
 # Média
 # image | video | both
 ALERT_MEDIA_TYPE = os.getenv("ALERT_MEDIA_TYPE", "image").lower()
@@ -482,40 +505,48 @@ def on_message(client, userdata, msg):
     if score < MIN_SCORE:
         return
 
-    # --- Logique intelligente : jour vs nuit + zones interdites ---
-    business = is_business_hours()
-    mode = "jour" if business else "nuit"
-    in_restricted = bool(set(zones) & RESTRICTED_ZONES)
-
-    if business:
-        # En heures ouvrées : opérateurs = normal.
-        # On alerte UNIQUEMENT si :
-        #   - personne dans une zone restreinte
-        #   - véhicule (car/truck/motorcycle) — toute arrivée véhicule = à signaler
-        if label == "person" and not in_restricted:
-            db_log(event_id, camera, label, score, zones, mode,
-                   "jour_normal", sent=False, filter_reason="personne_zone_autorisee")
-            log.debug(f"🟢 Jour ouvré, personne en zone autorisée — ignoré ({event_id})")
-            return
-        reason = "zone_interdite" if in_restricted else "vehicule_jour"
-    else:
-        # Hors heures ouvrées : TOUTE détection = alerte
-        reason = "hors_horaires"
-
-    # --- Cooldown (plus court la nuit) ---
-    cooldown = COOLDOWN_SECONDS if business else COOLDOWN_SECONDS_NIGHT
-    cache_key = f"{camera}_{label}_{reason}"
+    # ============================================================
+    # === RÈGLE ACTIVE (Option A) : reprise d'activité après calme ===
+    # ============================================================
+    # On alerte SI ET SEULEMENT SI la dernière détection sur cette
+    # caméra remonte à plus de INACTIVITY_THRESHOLD_SECONDS.
+    # Sinon on enregistre silencieusement la détection et on sort.
     now = time.time()
-    if cache_key in last_alert and (now - last_alert[cache_key]) < cooldown:
-        db_log(event_id, camera, label, score, zones, mode, reason,
-               sent=False, filter_reason="cooldown")
-        log.debug(f"⏳ Cooldown actif pour {cache_key}")
-        return
-    last_alert[cache_key] = now
+    prev = last_detection_ts.get(camera)
+    inactivity = (now - prev) if prev else float("inf")
+    # On met TOUJOURS à jour le dernier "vu" (sinon le seuil ne se réarme jamais)
+    last_detection_ts[camera] = now
 
+    # Mode et raison sont conservés pour la caption / la DB (compat rapport matinal)
+    mode = "jour" if is_business_hours() else "nuit"
+
+    if inactivity < INACTIVITY_THRESHOLD_SECONDS:
+        db_log(event_id, camera, label, score, zones, mode,
+               "activite_continue", sent=False,
+               filter_reason=f"inactivite={int(inactivity)}s<{INACTIVITY_THRESHOLD_SECONDS}s")
+        log.debug(
+            f"🟢 Activité continue sur {camera} "
+            f"(dernière détection il y a {int(inactivity)}s) — ignoré ({event_id})"
+        )
+        return
+
+    # Anti-rafale sur l'alerte de reprise elle-même
+    last_react = last_reactivation_alert.get(camera, 0)
+    if (now - last_react) < REACTIVATION_COOLDOWN_SECONDS:
+        db_log(event_id, camera, label, score, zones, mode,
+               "reprise_activite", sent=False, filter_reason="cooldown_reprise")
+        log.debug(f"⏳ Cooldown reprise actif pour {camera}")
+        return
+    last_reactivation_alert[camera] = now
+
+    reason = "reprise_activite"
+    inactivity_str = (
+        f"{int(inactivity // 3600)}h{int((inactivity % 3600) // 60):02d}"
+        if inactivity != float("inf") else "première détection"
+    )
     log.info(
-        f"🔔 Alerte [{mode.upper()}/{reason}] : {label} ({score:.0%}) "
-        f"sur {camera} zones={zones} (event {event_id})"
+        f"🔔 REPRISE D'ACTIVITÉ après {inactivity_str} d'inactivité : "
+        f"{label} ({score:.0%}) sur {camera} zones={zones} (event {event_id})"
     )
     try:
         sent = envoyer_alerte(camera, label, score, event_id, zones, bbox, mode, reason)
@@ -524,6 +555,53 @@ def on_message(client, userdata, msg):
         log.exception(f"❌ Erreur traitement alerte {event_id}: {e}")
         db_log(event_id, camera, label, score, zones, mode, reason,
                sent=False, filter_reason=f"exception:{e}")
+
+    # ============================================================
+    # === PLAN B (désactivé) : ancienne logique jour/nuit + zones ===
+    # === Décommenter ce bloc ET commenter le bloc "Option A" ci-  ===
+    # === dessus pour revenir à l'ancien comportement.            ===
+    # ============================================================
+    # business = is_business_hours()
+    # mode = "jour" if business else "nuit"
+    # in_restricted = bool(set(zones) & RESTRICTED_ZONES)
+    #
+    # if business:
+    #     # En heures ouvrées : opérateurs = normal.
+    #     # On alerte UNIQUEMENT si :
+    #     #   - personne dans une zone restreinte
+    #     #   - véhicule (car/truck/motorcycle) — toute arrivée véhicule = à signaler
+    #     if label == "person" and not in_restricted:
+    #         db_log(event_id, camera, label, score, zones, mode,
+    #                "jour_normal", sent=False, filter_reason="personne_zone_autorisee")
+    #         log.debug(f"🟢 Jour ouvré, personne en zone autorisée — ignoré ({event_id})")
+    #         return
+    #     reason = "zone_interdite" if in_restricted else "vehicule_jour"
+    # else:
+    #     # Hors heures ouvrées : TOUTE détection = alerte
+    #     reason = "hors_horaires"
+    #
+    # # --- Cooldown (plus court la nuit) ---
+    # cooldown = COOLDOWN_SECONDS if business else COOLDOWN_SECONDS_NIGHT
+    # cache_key = f"{camera}_{label}_{reason}"
+    # now = time.time()
+    # if cache_key in last_alert and (now - last_alert[cache_key]) < cooldown:
+    #     db_log(event_id, camera, label, score, zones, mode, reason,
+    #            sent=False, filter_reason="cooldown")
+    #     log.debug(f"⏳ Cooldown actif pour {cache_key}")
+    #     return
+    # last_alert[cache_key] = now
+    #
+    # log.info(
+    #     f"🔔 Alerte [{mode.upper()}/{reason}] : {label} ({score:.0%}) "
+    #     f"sur {camera} zones={zones} (event {event_id})"
+    # )
+    # try:
+    #     sent = envoyer_alerte(camera, label, score, event_id, zones, bbox, mode, reason)
+    #     db_log(event_id, camera, label, score, zones, mode, reason, sent=sent)
+    # except Exception as e:
+    #     log.exception(f"❌ Erreur traitement alerte {event_id}: {e}")
+    #     db_log(event_id, camera, label, score, zones, mode, reason,
+    #            sent=False, filter_reason=f"exception:{e}")
 
 
 def on_disconnect(client, userdata, rc):
@@ -559,6 +637,9 @@ def main():
     log.info(f"   Cooldown nuit    : {COOLDOWN_SECONDS_NIGHT}s")
     log.info(f"   Heures ouvrées   : {BUSINESS_HOUR_START}h–{BUSINESS_HOUR_END}h, jours={sorted(BUSINESS_DAYS)}")
     log.info(f"   Zones interdites : {sorted(RESTRICTED_ZONES)}")
+    log.info(f"   ⚙️  RÈGLE ACTIVE  : Option A — alerte si mouvement après "
+             f"{INACTIVITY_THRESHOLD_SECONDS}s ({INACTIVITY_THRESHOLD_SECONDS//60} min) d'inactivité")
+    log.info(f"   Cooldown reprise : {REACTIVATION_COOLDOWN_SECONDS}s")
     log.info(f"   Type d'alerte    : {ALERT_MEDIA_TYPE.upper()}")
     if ALERT_MEDIA_TYPE in ("video", "both"):
         log.info(f"   Attente clip     : {VIDEO_WAIT_SECONDS}s")
