@@ -101,7 +101,11 @@ last_reactivation_alert: dict[str, float] = {}
 
 # Média
 # image | video | both
-ALERT_MEDIA_TYPE = os.getenv("ALERT_MEDIA_TYPE", "image").lower()
+# Défaut "both" : photo immédiate (réactivité) + clip vidéo de
+# quelques secondes dès que Frigate l'a finalisé. Recommandé pour
+# les alertes "reprise d'activité après 1 h" — la vidéo permet
+# de juger l'intention (employé qui passe vs intrusion).
+ALERT_MEDIA_TYPE = os.getenv("ALERT_MEDIA_TYPE", "both").lower()
 VIDEO_WAIT_SECONDS = int(os.getenv("VIDEO_WAIT_SECONDS", "15"))
 
 # Traduction labels EN → FR (pour caption lisible par le responsable sécu)
