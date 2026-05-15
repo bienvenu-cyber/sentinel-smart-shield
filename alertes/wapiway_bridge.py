@@ -716,9 +716,14 @@ def main():
     log.info(f"   Cooldown nuit    : {COOLDOWN_SECONDS_NIGHT}s")
     log.info(f"   Heures ouvrées   : {BUSINESS_HOUR_START}h–{BUSINESS_HOUR_END}h, jours={sorted(BUSINESS_DAYS)}")
     log.info(f"   Zones interdites : {sorted(RESTRICTED_ZONES)}")
-    log.info(f"   ⚙️  RÈGLE ACTIVE  : Option A — alerte si mouvement après "
-             f"{INACTIVITY_THRESHOLD_SECONDS}s ({INACTIVITY_THRESHOLD_SECONDS//60} min) d'inactivité")
-    log.info(f"   Cooldown reprise : {REACTIVATION_COOLDOWN_SECONDS}s")
+    log.info("   ⚙️  RÈGLES ACTIVES (par priorité décroissante) :")
+    log.info(f"      1) NUIT          : {NIGHT_HOUR_START}h→{NIGHT_HOUR_END}h, "
+             f"toute personne = alerte (cooldown {NIGHT_COOLDOWN_SECONDS}s)")
+    log.info(f"      2) ENTRÉE        : cams={sorted(ENTRANCE_CAMERAS) or '(aucune)'}, "
+             f"chaque passage personne = alerte (cooldown {ENTRANCE_COOLDOWN_SECONDS}s)")
+    log.info(f"      3) REPRISE       : autres cams en journée, alerte après "
+             f"{INACTIVITY_THRESHOLD_SECONDS}s ({INACTIVITY_THRESHOLD_SECONDS//60} min) "
+             f"d'inactivité (cooldown {REACTIVATION_COOLDOWN_SECONDS}s)")
     log.info(f"   Type d'alerte    : {ALERT_MEDIA_TYPE.upper()}")
     if ALERT_MEDIA_TYPE in ("video", "both"):
         log.info(f"   Attente clip     : {VIDEO_WAIT_SECONDS}s")
