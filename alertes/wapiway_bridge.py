@@ -266,8 +266,14 @@ def build_alert_caption(
     live_url = f"{FRIGATE_PUBLIC_URL}/cameras/{camera}"
 
     # Bandeau de criticité selon le contexte
-    if reason == "zone_interdite":
+    if reason == "intrusion_nuit":
+        bandeau = "🔴 *INTRUSION NUIT — LOCAUX FERMÉS*"
+    elif reason == "passage_entree":
+        bandeau = "🟢 *PASSAGE ENTRÉE PRINCIPALE*"
+    elif reason == "zone_interdite":
         bandeau = "🔴 *CRITIQUE — ZONE INTERDITE*"
+    elif reason == "reprise_activite":
+        bandeau = "🟡 *REPRISE D'ACTIVITÉ APRÈS INACTIVITÉ*"
     elif mode == "nuit":
         bandeau = "🟠 *MODE NUIT — DÉTECTION HORS HORAIRES*"
     else:
