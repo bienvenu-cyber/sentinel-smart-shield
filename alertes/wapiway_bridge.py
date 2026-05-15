@@ -558,48 +558,75 @@ def on_message(client, userdata, msg):
         return
 
     # ============================================================
-    # === RÈGLE ACTIVE (Option A) : reprise d'activité après calme ===
+    # 3 RÈGLES — évaluées dans l'ordre de priorité
     # ============================================================
-    # On alerte SI ET SEULEMENT SI la dernière détection sur cette
-    # caméra remonte à plus de INACTIVITY_THRESHOLD_SECONDS.
-    # Sinon on enregistre silencieusement la détection et on sort.
     now = time.time()
     prev = last_detection_ts.get(camera)
     inactivity = (now - prev) if prev else float("inf")
     # On met TOUJOURS à jour le dernier "vu" (sinon le seuil ne se réarme jamais)
     last_detection_ts[camera] = now
 
-    # Mode et raison sont conservés pour la caption / la DB (compat rapport matinal)
-    mode = "jour" if is_business_hours() else "nuit"
+    night = is_night()
+    mode = "nuit" if night else "jour"
+    is_entrance_cam = camera in ENTRANCE_CAMERAS
 
-    if inactivity < INACTIVITY_THRESHOLD_SECONDS:
-        db_log(event_id, camera, label, score, zones, mode,
-               "activite_continue", sent=False,
-               filter_reason=f"inactivite={int(inactivity)}s<{INACTIVITY_THRESHOLD_SECONDS}s")
-        log.debug(
-            f"🟢 Activité continue sur {camera} "
-            f"(dernière détection il y a {int(inactivity)}s) — ignoré ({event_id})"
+    reason: str | None = None
+    cooldown_map: dict[str, float] | None = None
+    cooldown_seconds: int = 0
+
+    # --- RÈGLE 1 : MODE NUIT (priorité absolue) ---
+    # Toute personne détectée pendant la plage nuit = intrusion potentielle.
+    if night and label == "person":
+        reason = "intrusion_nuit"
+        cooldown_map = last_night_alert
+        cooldown_seconds = NIGHT_COOLDOWN_SECONDS
+
+    # --- RÈGLE 2 : CAMÉRA D'ENTRÉE (en journée) ---
+    # Chaque passage de personne sur la cam d'entrée = alerte avec photo.
+    elif is_entrance_cam and label == "person":
+        reason = "passage_entree"
+        cooldown_map = last_entrance_alert
+        cooldown_seconds = ENTRANCE_COOLDOWN_SECONDS
+
+    # --- RÈGLE 3 : REPRISE D'ACTIVITÉ (autres cams en journée) ---
+    else:
+        if inactivity < INACTIVITY_THRESHOLD_SECONDS:
+            db_log(event_id, camera, label, score, zones, mode,
+                   "activite_continue", sent=False,
+                   filter_reason=f"inactivite={int(inactivity)}s<{INACTIVITY_THRESHOLD_SECONDS}s")
+            log.debug(
+                f"🟢 Activité continue sur {camera} "
+                f"(dernière détection il y a {int(inactivity)}s) — ignoré ({event_id})"
+            )
+            return
+        reason = "reprise_activite"
+        cooldown_map = last_reactivation_alert
+        cooldown_seconds = REACTIVATION_COOLDOWN_SECONDS
+
+    # --- Anti-rafale par règle + caméra ---
+    last_ts = cooldown_map.get(camera, 0)
+    if (now - last_ts) < cooldown_seconds:
+        db_log(event_id, camera, label, score, zones, mode, reason,
+               sent=False, filter_reason=f"cooldown_{reason}")
+        log.debug(f"⏳ Cooldown {reason} actif pour {camera}")
+        return
+    cooldown_map[camera] = now
+
+    # --- Log lisible ---
+    if reason == "intrusion_nuit":
+        log.info(f"🔴 INTRUSION NUIT : {label} ({score:.0%}) sur {camera} (event {event_id})")
+    elif reason == "passage_entree":
+        log.info(f"🟢 PASSAGE ENTRÉE : {label} ({score:.0%}) sur {camera} (event {event_id})")
+    else:
+        inactivity_str = (
+            f"{int(inactivity // 3600)}h{int((inactivity % 3600) // 60):02d}"
+            if inactivity != float("inf") else "première détection"
         )
-        return
+        log.info(
+            f"🟡 REPRISE D'ACTIVITÉ après {inactivity_str} : "
+            f"{label} ({score:.0%}) sur {camera} (event {event_id})"
+        )
 
-    # Anti-rafale sur l'alerte de reprise elle-même
-    last_react = last_reactivation_alert.get(camera, 0)
-    if (now - last_react) < REACTIVATION_COOLDOWN_SECONDS:
-        db_log(event_id, camera, label, score, zones, mode,
-               "reprise_activite", sent=False, filter_reason="cooldown_reprise")
-        log.debug(f"⏳ Cooldown reprise actif pour {camera}")
-        return
-    last_reactivation_alert[camera] = now
-
-    reason = "reprise_activite"
-    inactivity_str = (
-        f"{int(inactivity // 3600)}h{int((inactivity % 3600) // 60):02d}"
-        if inactivity != float("inf") else "première détection"
-    )
-    log.info(
-        f"🔔 REPRISE D'ACTIVITÉ après {inactivity_str} d'inactivité : "
-        f"{label} ({score:.0%}) sur {camera} zones={zones} (event {event_id})"
-    )
     try:
         sent = envoyer_alerte(camera, label, score, event_id, zones, bbox, mode, reason)
         db_log(event_id, camera, label, score, zones, mode, reason, sent=sent)
