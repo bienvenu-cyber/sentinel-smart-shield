@@ -94,6 +94,32 @@ INACTIVITY_THRESHOLD_SECONDS = int(os.getenv("INACTIVITY_THRESHOLD_SECONDS", "36
 # même caméra (sinon chaque mouvement consécutif redéclencherait).
 REACTIVATION_COOLDOWN_SECONDS = int(os.getenv("REACTIVATION_COOLDOWN_SECONDS", "300"))
 
+# ----------------------------------------------------------------
+# RÈGLE 1 — MODE NUIT (locaux fermés)
+#   Toute personne sur n'importe quelle cam = alerte immédiate.
+#   Plage horaire [NIGHT_HOUR_START, NIGHT_HOUR_END[, traverse minuit
+#   si START > END (ex: 20 → 6).
+# ----------------------------------------------------------------
+NIGHT_HOUR_START = int(os.getenv("NIGHT_HOUR_START", "20"))
+NIGHT_HOUR_END = int(os.getenv("NIGHT_HOUR_END", "6"))
+NIGHT_COOLDOWN_SECONDS = int(os.getenv("NIGHT_COOLDOWN_SECONDS", "60"))
+
+# ----------------------------------------------------------------
+# RÈGLE 2 — CAMÉRAS D'ENTRÉE PRINCIPALE
+#   Sur ces caméras, CHAQUE passage de personne (entrée + sortie)
+#   déclenche une alerte avec photo + heure exacte.
+# ----------------------------------------------------------------
+ENTRANCE_CAMERAS = {
+    c.strip()
+    for c in os.getenv("ENTRANCE_CAMERAS", "").split(",")
+    if c.strip()
+}
+ENTRANCE_COOLDOWN_SECONDS = int(os.getenv("ENTRANCE_COOLDOWN_SECONDS", "30"))
+
+# Mémoires anti-rafale (par caméra)
+last_night_alert: dict[str, float] = {}
+last_entrance_alert: dict[str, float] = {}
+
 # Mémoire en RAM : dernière détection vue par caméra (timestamp epoch)
 last_detection_ts: dict[str, float] = {}
 # Mémoire en RAM : dernière alerte "reprise d'activité" par caméra
@@ -194,6 +220,22 @@ def is_business_hours(now: datetime | None = None) -> bool:
         n.weekday() in BUSINESS_DAYS
         and BUSINESS_HOUR_START <= n.hour < BUSINESS_HOUR_END
     )
+
+
+def is_night(now: datetime | None = None) -> bool:
+    """True si on est dans la plage nuit (locaux fermés).
+
+    Gère le cas où la plage traverse minuit (START > END), ex 20 → 6 :
+    nuit = h >= 20 OU h < 6.
+    """
+    n = now or datetime.now()
+    h = n.hour
+    if NIGHT_HOUR_START == NIGHT_HOUR_END:
+        return False
+    if NIGHT_HOUR_START < NIGHT_HOUR_END:
+        return NIGHT_HOUR_START <= h < NIGHT_HOUR_END
+    # Plage qui traverse minuit
+    return h >= NIGHT_HOUR_START or h < NIGHT_HOUR_END
 
 
 # ================================================================
