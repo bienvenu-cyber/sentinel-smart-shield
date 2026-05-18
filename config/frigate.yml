@@ -91,3 +91,18 @@ cameras:
         coordinates: 960,400,1920,400,1920,0,960,0
         objects:
           - person
+
+  # --- Caméra EZVIZ #2 (CS-C6N) ---
+  # Code de vérification propre à cette caméra (FRIGATE_RTSP_PASSWORD_CAM2).
+  cam_ezviz2:
+    ffmpeg:
+      inputs:
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD_CAM2}@{FRIGATE_CAM_EZVIZ2_IP}:{FRIGATE_CAM_EZVIZ2_PORT}{FRIGATE_CAM_EZVIZ2_PATH}
+          roles: [detect, record]
+          input_args: preset-rtsp-restream
+    detect:
+      enabled: true
+      width: 1920
+      height: 1080
+      fps: 5
+    # Zones à dessiner via l'UI Frigate après installation physique.
