@@ -70,3 +70,29 @@ services:
     depends_on:
       - mosquitto
       - frigate
+
+  # --- Surveillance auto des caméras (ping → MQTT enable/disable) ---
+  # Ping périodiquement les caméras "instables" (ex: CAM 2 souvent offline)
+  # et active/désactive automatiquement leur capture dans Frigate.
+  # Évite les logs ffmpeg en boucle quand la cam est éteinte ET
+  # la réactive toute seule dès qu'elle revient sur le réseau.
+  cam-watcher:
+    container_name: cam-watcher
+    build:
+      context: ./cam-watcher
+      dockerfile: Dockerfile
+    restart: always
+    network_mode: host   # nécessaire pour pinger les IP du LAN
+    environment:
+      - MQTT_HOST=127.0.0.1
+      - MQTT_PORT=1883
+      # Liste "nom_frigate=IP,nom_frigate=IP"
+      - WATCHED_CAMERAS=rotissage_cam2=${CAM_ROTISSAGE2_IP}
+      - CHECK_INTERVAL=60
+      - UP_THRESHOLD=2
+      - DOWN_THRESHOLD=3
+    env_file:
+      - .env
+    depends_on:
+      - mosquitto
+      - frigate
