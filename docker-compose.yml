@@ -1,6 +1,10 @@
 # =============================================================
 # Système de vidéosurveillance intelligent
-# Frigate NVR + MQTT + Alertes WhatsApp (WapiWay) + Cloudflare Tunnel
+# Frigate NVR + MQTT + Alertes WhatsApp (WapiWay)
+#
+# Note : pas de Cloudflare Tunnel — les snapshots/vidéos sont
+# uploadés sur catbox.moe (cf. alertes/wapiway_bridge.py), donc
+# Frigate n'a pas besoin d'être exposé publiquement.
 # =============================================================
 
 services:
@@ -65,15 +69,4 @@ services:
       - .env
     depends_on:
       - mosquitto
-      - frigate
-
-  # --- Cloudflare Tunnel (expose Frigate publiquement pour WapiWay) ---
-  cloudflared:
-    container_name: cloudflared
-    image: cloudflare/cloudflared:latest
-    restart: always
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
       - frigate
