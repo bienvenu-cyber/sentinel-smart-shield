@@ -91,17 +91,19 @@ cameras:
   # --- Rôtissage CAM 2 (EZVIZ CS-C6N) — INTÉRIEUR production ---
   # Posée à l'intérieur de la zone de production rôtissage.
   # Règle 3 (reprise d'activité après 1 h sans détection) en journée.
-  rotissage_cam2:
-    ffmpeg:
-      inputs:
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE2_PASSWORD}@{FRIGATE_CAM_ROTISSAGE2_IP}:{FRIGATE_CAM_ROTISSAGE2_PORT}{FRIGATE_CAM_ROTISSAGE2_PATH}
-          roles: [detect, record]
-          input_args: preset-rtsp-restream
-    detect:
-      enabled: true
-      width: 1920
-      height: 1080
-      fps: 5
-    # Zones à dessiner via l'UI Frigate :
-    # zone_travail    : surface où les opérateurs ont le droit d'être en journée
-    # zone_restreinte : stockage produits finis (interdit même de jour)
+  # ⚠️ DÉSACTIVÉE temporairement (caméra offline au 28/05/2026).
+  # Réactiver en décommentant ce bloc une fois la cam rebranchée / IP confirmée.
+  # rotissage_cam2:
+  #   ffmpeg:
+  #     inputs:
+  #       - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE2_PASSWORD}@{FRIGATE_CAM_ROTISSAGE2_IP}:{FRIGATE_CAM_ROTISSAGE2_PORT}{FRIGATE_CAM_ROTISSAGE2_PATH}
+  #         roles: [detect, record]
+  #         input_args: preset-rtsp-restream
+  #   detect:
+  #     enabled: true
+  #     width: 1920
+  #     height: 1080
+  #     fps: 5
+  #   # Zones à dessiner via l'UI Frigate :
+  #   # zone_travail    : surface où les opérateurs ont le droit d'être en journée
+  #   # zone_restreinte : stockage produits finis (interdit même de jour)
