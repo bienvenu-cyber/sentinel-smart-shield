@@ -104,6 +104,6 @@ cameras:
   #     width: 1920
   #     height: 1080
   #     fps: 5
-    # Zones à dessiner via l'UI Frigate :
-    # zone_travail    : surface où les opérateurs ont le droit d'être en journée
-    # zone_restreinte : stockage produits finis (interdit même de jour)
+  #   # Zones à dessiner via l'UI Frigate :
+  #   # zone_travail    : surface où les opérateurs ont le droit d'être en journée
+  #   # zone_restreinte : stockage produits finis (interdit même de jour)
