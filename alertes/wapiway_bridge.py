@@ -302,44 +302,69 @@ def build_alert_caption(
 def download_snapshot(event_id: str) -> str | None:
     """Télécharge le snapshot JPEG d'un événement Frigate."""
     url = f"{FRIGATE_URL}/api/events/{event_id}/snapshot.jpg?bbox=1&timestamp=1"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code != 200 or not resp.content:
-            log.error(f"❌ Snapshot indisponible ({resp.status_code}) pour {event_id}")
+    for attempt in range(1, 4):  # 3 essais (2s, 4s entre chaque)
+        try:
+            resp = requests.get(url, timeout=15)
+            if resp.status_code != 200 or not resp.content:
+                log.error(f"❌ Snapshot indisponible ({resp.status_code}) pour {event_id}")
+                return None
+            fd, path = tempfile.mkstemp(suffix=".jpg", prefix=f"frig_{event_id}_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(resp.content)
+            log.info(f"   💾 Snapshot téléchargé : {path} ({len(resp.content)//1024} Ko)")
+            return path
+        except requests.exceptions.ConnectionError as e:
+            log.warning(f"⚠️ Connexion Frigate KO (essai {attempt}/3) snapshot {event_id}: {e}")
+            _maybe_self_destruct(e)
+            time.sleep(2 * attempt)
+        except Exception as e:
+            log.error(f"❌ Exception snapshot {event_id}: {e}")
             return None
-        fd, path = tempfile.mkstemp(suffix=".jpg", prefix=f"frig_{event_id}_")
-        with os.fdopen(fd, "wb") as f:
-            f.write(resp.content)
-        log.info(f"   💾 Snapshot téléchargé : {path} ({len(resp.content)//1024} Ko)")
-        return path
-    except Exception as e:
-        log.error(f"❌ Exception snapshot {event_id}: {e}")
-        return None
+    return None
 
 
 def download_clip(event_id: str) -> str | None:
     """Télécharge le clip MP4 d'un événement Frigate (après finalisation)."""
     url = f"{FRIGATE_URL}/api/events/{event_id}/clip.mp4"
-    try:
-        # On laisse Frigate finaliser le clip
-        log.info(f"   ⏳ Attente clip {event_id} ({VIDEO_WAIT_SECONDS}s)...")
-        time.sleep(VIDEO_WAIT_SECONDS)
-        resp = requests.get(url, timeout=60, stream=True)
-        if resp.status_code != 200:
-            log.error(f"❌ Clip indisponible ({resp.status_code}) pour {event_id}")
+    # On laisse Frigate finaliser le clip
+    log.info(f"   ⏳ Attente clip {event_id} ({VIDEO_WAIT_SECONDS}s)...")
+    time.sleep(VIDEO_WAIT_SECONDS)
+    for attempt in range(1, 4):
+        try:
+            resp = requests.get(url, timeout=60, stream=True)
+            if resp.status_code != 200:
+                log.error(f"❌ Clip indisponible ({resp.status_code}) pour {event_id}")
+                return None
+            fd, path = tempfile.mkstemp(suffix=".mp4", prefix=f"frig_{event_id}_")
+            size = 0
+            with os.fdopen(fd, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        f.write(chunk)
+                        size += len(chunk)
+            log.info(f"   💾 Clip téléchargé : {path} ({size//1024} Ko)")
+            return path
+        except requests.exceptions.ConnectionError as e:
+            log.warning(f"⚠️ Connexion Frigate KO (essai {attempt}/3) clip {event_id}: {e}")
+            _maybe_self_destruct(e)
+            time.sleep(3 * attempt)
+        except Exception as e:
+            log.error(f"❌ Exception clip {event_id}: {e}")
             return None
-        fd, path = tempfile.mkstemp(suffix=".mp4", prefix=f"frig_{event_id}_")
-        size = 0
-        with os.fdopen(fd, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                if chunk:
-                    f.write(chunk)
-                    size += len(chunk)
-        log.info(f"   💾 Clip téléchargé : {path} ({size//1024} Ko)")
-        return path
-    except Exception as e:
-        log.error(f"❌ Exception clip {event_id}: {e}")
-        return None
+    return None
+
+
+def _maybe_self_destruct(exc: Exception) -> None:
+    """Si l'erreur est un DNS qui n'arrive pas à résoudre 'frigate' (cas typique
+    après recreate de Frigate), on quitte le process : Docker (restart: always)
+    relancera le conteneur, ce qui force une re-résolution DNS propre.
+    """
+    msg = str(exc).lower()
+    if "name or service not known" in msg or "nameresolutionerror" in msg or "failed to resolve" in msg:
+        log.error("💀 DNS Frigate cassé → arrêt du process pour relance Docker auto.")
+        # petit délai pour laisser flush les logs
+        time.sleep(1)
+        os._exit(1)
 
 
 # ================================================================
