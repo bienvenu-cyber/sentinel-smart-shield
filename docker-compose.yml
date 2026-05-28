@@ -88,7 +88,7 @@ services:
       - MQTT_PORT=1883
       # Liste "nom_frigate=IP,nom_frigate=IP"
       - WATCHED_CAMERAS=rotissage_cam2=${CAM_ROTISSAGE2_IP}
-      - CHECK_INTERVAL=60
+      - CHECK_INTERVAL=600
       - UP_THRESHOLD=2
       - DOWN_THRESHOLD=3
     env_file:
