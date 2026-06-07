@@ -67,13 +67,23 @@ cameras:
   rotissage_cam1:
     ffmpeg:
       inputs:
+        # Sous-flux basse résolution (léger) → ANALYSE IA seulement.
+        # ~10× moins de données : évite les "corrupt decoded frame"
+        # quand le WiFi de la caméra est faible/instable.
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH_SUB}
+          roles: [detect]
+          input_args: preset-rtsp-restream
+        # Flux principal 1080p → ENREGISTREMENT seulement.
         - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH}
-          roles: [detect, record]
+          roles: [record]
           input_args: preset-rtsp-restream
     detect:
       enabled: true
-      width: 1920
-      height: 1080
+      # Résolution du SOUS-flux EZVIZ CS-C6N (souvent 640×360).
+      # Si Frigate affiche un avertissement de résolution, ajuster
+      # ces valeurs à celles annoncées dans les logs.
+      width: 640
+      height: 360
       fps: 5
     # --- Zones à dessiner via l'UI Frigate (Edit zones) ---
     # zone_entree     : porte d'accès principale (toute personne = à signaler)
