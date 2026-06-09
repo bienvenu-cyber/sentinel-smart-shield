@@ -63,24 +63,25 @@ cameras:
   rotissage_cam1:
     ffmpeg:
       inputs:
-        # WiFi faible : on utilise UNIQUEMENT le sous-flux basse résolution
-        # pour TOUT (analyse IA + enregistrement). Léger → aucune perte de
-        # segment, plus de "corrupt decoded frame" ni de segments jetés.
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH_SUB}
+        # Le sous-flux EZVIZ (canal 102) renvoyait une image NOIRE
+        # (sous-flux désactivé côté caméra) → aucune détection, donc
+        # aucune alerte. On revient au FLUX PRINCIPAL (canal 101) pour
+        # l'analyse IA + l'enregistrement : image exploitable garantie.
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH}
           roles: [detect, record]
           input_args: preset-rtsp-restream
-        # ↪️ Quand le WiFi sera renforcé (caméra rapprochée du routeur /
-        #    répéteur), réactiver l'enregistrement 1080p en remplaçant le
-        #    bloc ci-dessus par deux entrées séparées :
-        #      - path: ...{PATH_SUB}   roles: [detect]
-        #      - path: ...{PATH}       roles: [record]
+        # ↪️ Pour soulager le WiFi sans perdre l'image, deux options :
+        #    1) ACTIVER le sous-flux dans l'app EZVIZ (Paramètres →
+        #       Qualité vidéo → flux fluide), puis remettre {PATH_SUB}
+        #       en role [detect] et {PATH} en role [record].
+        #    2) Rapprocher la caméra du routeur / ajouter un répéteur.
     detect:
       enabled: true
-      # Résolution du SOUS-flux EZVIZ CS-C6N (souvent 640×360).
-      # Si Frigate affiche un avertissement de résolution, ajuster
-      # ces valeurs à celles annoncées dans les logs.
-      width: 640
-      height: 360
+      # Résolution du FLUX PRINCIPAL EZVIZ CS-C6N (1080p).
+      # Si Frigate affiche un avertissement de résolution dans les logs,
+      # ajuster ces valeurs à celles qu'il annonce.
+      width: 1920
+      height: 1080
       fps: 5
     # --- Zones à dessiner via l'UI Frigate (Edit zones) ---
     # zone_entree     : porte d'accès principale (toute personne = à signaler)
