@@ -23,7 +23,6 @@ objects:
   track:
     - person
     - car
-    - truck
     - motorcycle
   filters:
     person:
@@ -34,9 +33,6 @@ objects:
     car:
       min_score: 0.65
       min_area: 5000
-    truck:
-      min_score: 0.65
-      min_area: 8000
     motorcycle:
       min_score: 0.65
       min_area: 3000
