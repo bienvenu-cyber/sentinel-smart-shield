@@ -14,3 +14,4 @@ Déploiement projet : toujours `git clone` / `git pull`. Jamais de ZIP GitHub.
 - [Exposition Publique](mem://technologie/exposition-publique) — Cloudflare Tunnel pour exposer les snapshots Frigate.
 - [Caméras V380](mem://materiel/cameras-v380) — Contraintes d'accès flux et bridge Python P2P pour caméras V380.
 - [Déploiement git](mem://preferences/deploiement-git) — Toujours git clone / git pull, jamais ZIP GitHub.
+- [Dépannage Frigate](mem://depannage/frigate-boucle-restart) — Boucle "Container Restarting" (WiFi/ffmpeg → sous-flux 640×360), conflit git pull sur frigate.yml, image noire & erreurs transitoires normales.
