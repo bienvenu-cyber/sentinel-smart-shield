@@ -63,25 +63,20 @@ cameras:
   rotissage_cam1:
     ffmpeg:
       inputs:
-        # Le sous-flux EZVIZ (canal 102) renvoyait une image NOIRE
-        # (sous-flux désactivé côté caméra) → aucune détection, donc
-        # aucune alerte. On revient au FLUX PRINCIPAL (canal 101) pour
-        # l'analyse IA + l'enregistrement : image exploitable garantie.
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH}
-          roles: [detect, record]
+        # Sous-flux EZVIZ (canal 102, 640×360) pour l'ANALYSE IA :
+        # allège énormément le WiFi → moins de frames corrompues.
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH_SUB}
+          roles: [detect]
           input_args: preset-rtsp-restream
-        # ↪️ Pour soulager le WiFi sans perdre l'image, deux options :
-        #    1) ACTIVER le sous-flux dans l'app EZVIZ (Paramètres →
-        #       Qualité vidéo → flux fluide), puis remettre {PATH_SUB}
-        #       en role [detect] et {PATH} en role [record].
-        #    2) Rapprocher la caméra du routeur / ajouter un répéteur.
+        # Flux principal (canal 101, 1080p) uniquement pour l'ENREGISTREMENT.
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH}
+          roles: [record]
+          input_args: preset-rtsp-restream
     detect:
       enabled: true
-      # Résolution du FLUX PRINCIPAL EZVIZ CS-C6N (1080p).
-      # Si Frigate affiche un avertissement de résolution dans les logs,
-      # ajuster ces valeurs à celles qu'il annonce.
-      width: 1920
-      height: 1080
+      # Résolution du SOUS-FLUX EZVIZ CS-C6N (640×360).
+      width: 640
+      height: 360
       fps: 5
     # --- Zones à dessiner via l'UI Frigate (Edit zones) ---
     # zone_entree     : porte d'accès principale (toute personne = à signaler)
