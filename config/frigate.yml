@@ -63,18 +63,22 @@ cameras:
   rotissage_cam1:
     ffmpeg:
       inputs:
-        # Sous-flux EZVIZ (canal 102, 640×360) pour l'ANALYSE IA :
-        # allège énormément le WiFi → moins de frames corrompues.
+        # WiFi faible : on utilise UNIQUEMENT le sous-flux basse résolution
+        # pour TOUT (analyse IA + enregistrement). Léger → aucune perte de
+        # segment, plus de "corrupt decoded frame" ni de segments jetés.
         - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH_SUB}
-          roles: [detect]
+          roles: [detect, record]
           input_args: preset-rtsp-restream
-        # Flux principal (canal 101, 1080p) uniquement pour l'ENREGISTREMENT.
-        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_CAM_ROTISSAGE1_PASSWORD}@{FRIGATE_CAM_ROTISSAGE1_IP}:{FRIGATE_CAM_ROTISSAGE1_PORT}{FRIGATE_CAM_ROTISSAGE1_PATH}
-          roles: [record]
-          input_args: preset-rtsp-restream
+        # ↪️ Quand le WiFi sera renforcé (caméra rapprochée du routeur /
+        #    répéteur), réactiver l'enregistrement 1080p en remplaçant le
+        #    bloc ci-dessus par deux entrées séparées :
+        #      - path: ...{PATH_SUB}   roles: [detect]
+        #      - path: ...{PATH}       roles: [record]
     detect:
       enabled: true
-      # Résolution du SOUS-FLUX EZVIZ CS-C6N (640×360).
+      # Résolution du SOUS-flux EZVIZ CS-C6N (souvent 640×360).
+      # Si Frigate affiche un avertissement de résolution, ajuster
+      # ces valeurs à celles annoncées dans les logs.
       width: 640
       height: 360
       fps: 5
