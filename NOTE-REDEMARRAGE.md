@@ -17,7 +17,7 @@ Ouvre **PowerShell** (menu Démarrer → tape `powershell`) et colle ces 2 ligne
 une par une, en appuyant sur Entrée :
 
 ```powershell
-cd "C:\Users\TOLARO GLOBAL\sentinel-smart-shield"
+cd "C:\Users\HP\Desktop\sentinel-smart-shield"
 docker compose up -d
 ```
 
